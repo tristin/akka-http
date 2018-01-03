@@ -33,7 +33,8 @@ import scala.util.{ Failure, Success, Try }
 
 abstract class ConnectionPoolSpec(poolImplementation: PoolImplementation) extends AkkaSpec("""
     akka.loggers = []
-    akka.loglevel = OFF
+    akka.loglevel = ERROR
+    akka.loggers = ["akka.testkit.TestEventListener"]
     akka.io.tcp.windows-connection-abort-workaround-enabled = auto
     akka.io.tcp.trace-logging = off
     akka.test.single-expect-default = 5000 # timeout for checks, adjust as necessary, set here to 5s
@@ -216,7 +217,9 @@ abstract class ConnectionPoolSpec(poolImplementation: PoolImplementation) extend
       val handlerSetter = Await.result(laterHandler.future, 1.second.dilated)
 
       // now fail the first one
-      errorOnConnection1.failure(new RuntimeException)
+      EventFilter[RuntimeException](occurrences = 1) intercept {
+        errorOnConnection1.failure(new RuntimeException)
+      }
 
       // waiting for error to trigger connection pool failure
       Thread.sleep(2000)
@@ -255,9 +258,15 @@ abstract class ConnectionPoolSpec(poolImplementation: PoolImplementation) extend
 
       val remainingResponsesToKill = new AtomicInteger(5)
       override def mapServerSideOutboundRawBytes(bytes: ByteString): ByteString =
-        if (bytes.utf8String.contains("/crash") && remainingResponsesToKill.decrementAndGet() >= 0)
-          sys.error("CRASH BOOM BANG")
-        else bytes
+        if (bytes.utf8String.contains("/crash")) {
+          val retriesLeft = remainingResponsesToKill.decrementAndGet()
+          if (retriesLeft >= 0) {
+            // #1667 this test sometimes fails because remainingResponsesToKill is not properly
+            // decremented, let's see if we do come here:
+            log.error(s"Crashing a /crash request to get to maxRetries, $retriesLeft retries left")
+            sys.error("CRASH BOOM BANG")
+          } else bytes
+        } else bytes
 
       val responses = Seq(responseOut.expectNext(), responseOut.expectNext())
 
@@ -278,6 +287,7 @@ abstract class ConnectionPoolSpec(poolImplementation: PoolImplementation) extend
 
       val gateway = hcp.gateway
       Await.result(gateway.poolStatus(), 1500.millis.dilated).get shouldBe a[PoolInterfaceRunning]
+
       awaitCond({ Await.result(gateway.poolStatus(), 1500.millis.dilated).isEmpty }, 2000.millis.dilated)
 
       requestIn.sendNext(HttpRequest(uri = "/") → 42)
