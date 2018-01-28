@@ -1,10 +1,3 @@
-@@@ div { .group-java }
-
-This DSL is only relevant when using the Scala API.
-
-@@@
-
-@@@ div { .group-scala }
 # The PathMatcher DSL
 
 For being able to work with the @ref[PathDirectives](directives/path-directives/index.md) effectively you should have some understanding of the
