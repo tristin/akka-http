@@ -4,3 +4,8 @@ ProblemFilters.exclude[Problem]("akka.http.impl.*")
 # #1942 New ignoreIllegalHeaderFor setting
 ProblemFilters.exclude[ReversedMissingMethodProblem]("akka.http.javadsl.settings.ParserSettings.getIgnoreIllegalHeaderFor")
 ProblemFilters.exclude[ReversedMissingMethodProblem]("akka.http.scaladsl.settings.ParserSettings.ignoreIllegalHeaderFor")
+
+# #1926 Allow client setting overrides for host / host-patterns
+# private method:
+ProblemFilters.exclude[IncompatibleMethTypeProblem]("akka.http.scaladsl.HttpExt.cachedHostConnectionPoolImpl")
+ProblemFilters.exclude[IncompatibleResultTypeProblem]("akka.http.scaladsl.HttpExt.cachedHostConnectionPoolImpl$default$3")

@@ -497,35 +497,30 @@ class HttpExt private[http] (private val config: Config)(implicit val system: Ex
     gatewayClientFlow(setup, gateway.startPool())
   }
 
-  /**
-   * Returns a [[akka.stream.scaladsl.Flow]] which dispatches incoming HTTP requests to the per-ActorSystem pool of outgoing
-   * HTTP connections to the given target host endpoint. For every ActorSystem, target host and pool
-   * configuration a separate connection pool is maintained.
-   * The HTTP layer transparently manages idle shutdown and restarting of connections pools as configured.
-   * The returned [[akka.stream.scaladsl.Flow]] instances therefore remain valid throughout the lifetime of the application.
-   *
-   * The internal caching logic guarantees that there will never be more than a single pool running for the
-   * given target host endpoint and configuration (in this ActorSystem).
-   *
-   * Since the underlying transport usually comprises more than a single connection the produced flow might generate
-   * responses in an order that doesn't directly match the consumed requests.
-   * For example, if two requests A and B enter the flow in that order the response for B might be produced before the
-   * response for A.
-   * In order to allow for easy response-to-request association the flow takes in a custom, opaque context
-   * object of type `T` from the application which is emitted together with the corresponding response.
-   *
-   * To configure additional settings for the pool (and requests made using it),
-   * use the `akka.http.host-connection-pool` config section or pass in a [[ConnectionPoolSettings]] explicitly.
-   */
-  def cachedHostConnectionPool[T](host: String, port: Int = 80,
-                                  settings: ConnectionPoolSettings = defaultConnectionPoolSettings,
-                                  log:      LoggingAdapter         = system.log): Flow[(HttpRequest, T), (Try[HttpResponse], T), HostConnectionPool] =
-    cachedHostConnectionPoolImpl(host, port, settings, log)
+  def cachedHostConnectionPool[T](host: String): Flow[(HttpRequest, T), (Try[HttpResponse], T), HostConnectionPool] =
+    cachedHostConnectionPoolImpl(host)
+
+  def cachedHostConnectionPool[T](host: String, port: Int): Flow[(HttpRequest, T), (Try[HttpResponse], T), HostConnectionPool] =
+    cachedHostConnectionPoolImpl(host, port)
+
+  def cachedHostConnectionPool[T](host: String, port: Int,
+                                  settings: ConnectionPoolSettings): Flow[(HttpRequest, T), (Try[HttpResponse], T), HostConnectionPool] =
+    cachedHostConnectionPoolImpl(host, port, Some(settings))
+
+  def cachedHostConnectionPool[T](host: String, port: Int,
+                                  settings: ConnectionPoolSettings,
+                                  log:      LoggingAdapter): Flow[(HttpRequest, T), (Try[HttpResponse], T), HostConnectionPool] =
+    cachedHostConnectionPoolImpl(host, port, Some(settings), log)
+
+  //bincompat
+  private[http] def cachedHostConnectionPool$default$2(): Int = 80
+  private[http] def cachedHostConnectionPool$default$3(): ConnectionPoolSettings = defaultConnectionPoolSettings
+  private[http] def cachedHostConnectionPool$default$4(): akka.event.LoggingAdapter = system.log
 
   private[http] def cachedHostConnectionPoolImpl[T](host: String, port: Int = 80,
-                                                    settings: ConnectionPoolSettings = defaultConnectionPoolSettings,
-                                                    log:      LoggingAdapter         = system.log): Flow[(HttpRequest, T), (Try[HttpResponse], T), HostConnectionPool] = {
-    val cps = ConnectionPoolSetup(settings, ConnectionContext.noEncryption(), log)
+                                                    settings: Option[ConnectionPoolSettings] = None,
+                                                    log:      LoggingAdapter                 = system.log): Flow[(HttpRequest, T), (Try[HttpResponse], T), HostConnectionPool] = {
+    val cps = ConnectionPoolSetup(settings.getOrElse(null), ConnectionContext.noEncryption(), log)
     val setup = HostConnectionPoolSetup(host, port, cps)
     cachedHostConnectionPool(setup)
   }
@@ -534,7 +529,7 @@ class HttpExt private[http] (private val config: Config)(implicit val system: Ex
   private[http] def cachedHostConnectionPool[T](host: String, port: Int,
                                                 settings: ConnectionPoolSettings,
                                                 log:      LoggingAdapter)(implicit fm: Materializer): Flow[(HttpRequest, T), (Try[HttpResponse], T), HostConnectionPool] =
-    cachedHostConnectionPoolImpl(host, port, settings, log)
+    cachedHostConnectionPoolImpl(host, port, Some(settings), log)
 
   /**
    * Same as [[#cachedHostConnectionPool]] but for encrypted (HTTPS) connections.
