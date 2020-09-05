@@ -8,7 +8,7 @@ XML or even binary encodings.
 
 Akka HTTP does not currently provide a Java API for XML support. If you need to
 produce and consume XML, you can write a @ref[custom marshaller](marshalling.md#custom-marshallers)
-using [Jackson], which is also the library used for providing @ref[JSON support](json-support.md#json-jackson-support-java).
+using [Jackson], which is also the library used for providing @ref[JSON support](json-support.md#jackson-support).
 
 @@ snip [#jackson-xml-support] ($root$/src/test/java/docs/http/javadsl/JacksonXmlSupport.java) { #jackson-xml-support }
 
@@ -36,9 +36,11 @@ In order to enable support for (un)marshalling from and to XML with [Scala XML][
 the following dependency:
 
 @@dependency [sbt,Gradle,Maven] {
+  symbol="AkkaHttpVersion"
+  value="$project.version$"
   group="com.typesafe.akka"
   artifact="akka-http-xml_$scala.binary.version$"
-  version="$project.version$"
+  version="AkkaHttpVersion"
 }
 
 Once you have done this (un)marshalling between XML and `NodeSeq` instances should work nicely and transparently,

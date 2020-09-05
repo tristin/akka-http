@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka
@@ -11,66 +11,71 @@ import scala.language.implicitConversions
 object Dependencies {
   import DependencyHelpers._
 
-  val jacksonVersion = "2.9.5"
+  val jacksonVersion = "2.10.5"
   val junitVersion = "4.12"
   val h2specVersion = "1.5.0"
   val h2specName = s"h2spec_${DependencyHelpers.osName}_amd64"
   val h2specExe = "h2spec" + DependencyHelpers.exeIfWindows
   val h2specUrl = s"https://github.com/summerwind/h2spec/releases/download/v${h2specVersion}/${h2specName}.zip"
-  val alpnAgentVersion = "2.0.7"
+  val silencerVersion = "1.7.1"
 
-  lazy val akkaVersion = settingKey[String]("The version of Akka to use.")
-  lazy val scalaTestVersion = settingKey[String]("The version of ScalaTest to use.")
-  lazy val specs2Version = settingKey[String]("The version of Specs2 to use")
-  lazy val scalaCheckVersion = settingKey[String]("The version of ScalaCheck to use.")
+  val scalaTestVersion = "3.1.4"
+  val specs2Version = "4.10.3"
+  val scalaCheckVersion = "1.14.3"
+
+  val scalafixVersion = _root_.scalafix.sbt.BuildInfo.scalafixVersion // grab from plugin
+
+  val scala212Version = "2.12.12"
+  val scala213Version = "2.13.3"
 
   val Versions = Seq(
-    crossScalaVersions := Seq("2.12.6", "2.11.12", "2.13.0-M3"),
+    crossScalaVersions := Seq(scala213Version, scala212Version),
     scalaVersion := crossScalaVersions.value.head,
-    scalaCheckVersion := System.getProperty("akka.build.scalaCheckVersion", "1.14.0"),
-    scalaTestVersion := "3.0.5",
-    specs2Version := "4.2.0"
   )
-  import Versions._
 
+  object Provided {
+    val jsr305 = "com.google.code.findbugs" % "jsr305" % "3.0.2" % "provided" // ApacheV2
+
+    val scalaReflect  = ScalaVersionDependentModuleID.versioned("org.scala-lang" % "scala-reflect" % _ % "provided") // Scala License
+  }
 
   object Compile {
-    val scalaXml      = "org.scala-lang.modules"      %% "scala-xml"                   % "1.1.0" // Scala License
-    val scalaReflect  = ScalaVersionDependentModuleID.versioned("org.scala-lang" % "scala-reflect" % _) // Scala License
+    val scalaXml      = "org.scala-lang.modules"      %% "scala-xml"                   % "1.3.0" // Scala License
 
     // For akka-http spray-json support
-    val sprayJson   = "io.spray"                     %% "spray-json"                   % "1.3.4"       // ApacheV2
+    val sprayJson   = "io.spray"                     %% "spray-json"                   % "1.3.5"       // ApacheV2
 
     // For akka-http-jackson support
-    val jackson     = "com.fasterxml.jackson.core"    % "jackson-databind"             % jacksonVersion // ApacheV2
+    val jacksonDatabind = "com.fasterxml.jackson.core" % "jackson-databind"            % jacksonVersion // ApacheV2
 
     // For akka-http-testkit-java
     val junit       = "junit"                         % "junit"                        % junitVersion  // Common Public License 1.0
 
     val hpack       = "com.twitter"                   % "hpack"                        % "1.0.2"       // ApacheV2
 
-    val alpnApi     = "org.eclipse.jetty.alpn"        % "alpn-api"                     % "1.1.3.v20160715" // ApacheV2
+    val caffeine    = "com.github.ben-manes.caffeine" % "caffeine"                     % "2.8.5"
 
-    val caffeine    = "com.github.ben-manes.caffeine" % "caffeine"                     % "2.6.2"
-    val jsr305      = "com.google.code.findbugs"      % "jsr305"                       % "3.0.2"             % Provided // ApacheV2
+    val scalafix    = "ch.epfl.scala"                 %% "scalafix-core"               % Dependencies.scalafixVersion // grab from plugin
 
     object Docs {
       val sprayJson   = Compile.sprayJson                                                                    % "test"
-      val gson        = "com.google.code.gson"             % "gson"                    % "2.8.5"             % "test"
+      val gson        = "com.google.code.gson"             % "gson"                    % "2.8.6"             % "test"
       val jacksonXml  = "com.fasterxml.jackson.dataformat" % "jackson-dataformat-xml"  % jacksonVersion      % "test" // ApacheV2
-      val reflections = "org.reflections"                  % "reflections"             % "0.9.11"            % "test" // WTFPL
+      val reflections = "org.reflections"                  % "reflections"             % "0.9.12"            % "test" // WTFPL
     }
 
     object Test {
-      val junit        = Compile.junit                                                                       % "test" // Common Public License 1.0
-      val scalatest    = Def.setting { "org.scalatest"  %% "scalatest"   % scalaTestVersion.value   % "test" }      // ApacheV2
-      val specs2       = Def.setting { "org.specs2"     %% "specs2-core" % specs2Version.value      % "test" }      // MIT
-      val scalacheck   = Def.setting { "org.scalacheck" %% "scalacheck"  % scalaCheckVersion.value  % "test" }      // New BSD
-      val junitIntf    = "com.novocode"                % "junit-interface"              % "0.11"             % "test" // MIT
-      val sprayJson    = Compile.sprayJson                                                                   % "test" // ApacheV2
+      val sprayJson    = Compile.sprayJson                                         % "test" // ApacheV2
+      val junit        = Compile.junit                                             % "test" // Common Public License 1.0
+      val specs2       = "org.specs2"     %% "specs2-core"     % specs2Version     % "test" // MIT
+      val scalacheck   = "org.scalacheck" %% "scalacheck"      % scalaCheckVersion % "test" // New BSD
+      val junitIntf    = "com.novocode"    % "junit-interface" % "0.11"            % "test" // MIT
+
+      val scalatest               = "org.scalatest"     %% "scalatest"       % scalaTestVersion          % "test" // ApacheV2
+      val scalatestplusScalacheck = "org.scalatestplus" %% "scalacheck-1-14" % (scalaTestVersion + ".0") % "test"
+      val scalatestplusJUnit      = "org.scalatestplus" %% "junit-4-12"      % (scalaTestVersion + ".0") % "test"
 
       // HTTP/2
-      val alpnAgent    = "org.mortbay.jetty.alpn"      % "jetty-alpn-agent"             % alpnAgentVersion  % "test" // ApacheV2
       val h2spec       = "io.github.summerwind"        % h2specName                     % h2specVersion      % "test" from(h2specUrl) // MIT
     }
   }
@@ -81,42 +86,46 @@ object Dependencies {
 
   lazy val parsing = Seq(
     DependencyHelpers.versionDependentDeps(
-      Dependencies.Compile.scalaReflect % "provided"
+      Dependencies.Provided.scalaReflect
     ),
-    addCompilerPlugin("org.scalamacros" % "paradise" % "2.1.1" cross CrossVersion.full)
   )
 
   lazy val httpCore = l ++= Seq(
     Test.sprayJson, // for WS Autobahn test metadata
-    Test.scalatest.value, Test.scalacheck.value, Test.junit)
+    Test.scalatest, Test.scalatestplusScalacheck, Test.scalatestplusJUnit, Test.junit
+  )
 
-  lazy val httpCaching = l ++= Seq(caffeine, jsr305, Test.scalatest.value)
+  lazy val httpCaching = l ++= Seq(
+    caffeine,
+    Provided.jsr305,
+    Test.scalatest
+  )
 
-  lazy val http = l ++= Seq()
+  lazy val http = Seq()
 
-  lazy val http2 = l ++= Seq(hpack, alpnApi)
+  lazy val http2 = l ++= Seq(hpack)
 
   lazy val http2Support = l ++= Seq(Test.h2spec)
 
   lazy val httpTestkit = l ++= Seq(
     Test.junit, Test.junitIntf, Compile.junit % "provided",
-    Test.scalatest.value.withConfigurations(Some("provided; test")),
-    Test.specs2.value.withConfigurations(Some("provided; test"))
+    Test.scalatest.withConfigurations(Some("provided; test")),
+    Test.specs2.withConfigurations(Some("provided; test"))
   )
 
-  lazy val httpTests = l ++= Seq(Test.junit, Test.scalatest.value, Test.junitIntf)
+  lazy val httpTests = l ++= Seq(Test.junit, Test.scalatest, Test.junitIntf)
 
   lazy val httpXml = Seq(
     versionDependentDeps(scalaXml),
-    libraryDependencies += Test.scalatest.value
+    libraryDependencies += Test.scalatest
   )
 
   lazy val httpSprayJson = Seq(
     versionDependentDeps(sprayJson),
-    libraryDependencies += Test.scalatest.value
+    libraryDependencies += Test.scalatest
   )
 
-  lazy val httpJackson = l ++= Seq(jackson)
+  lazy val httpJackson = l ++= Seq(jacksonDatabind, Test.scalatestplusJUnit, Test.junit, Test.junitIntf)
 
   lazy val docs = l ++= Seq(Docs.sprayJson, Docs.gson, Docs.jacksonXml, Docs.reflections)
 }

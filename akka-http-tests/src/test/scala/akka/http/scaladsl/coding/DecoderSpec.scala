@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.coding
@@ -8,7 +8,6 @@ import akka.stream.{ Attributes, FlowShape }
 import akka.stream.impl.fusing.GraphStages.SimpleLinearGraphStage
 
 import scala.concurrent.duration._
-import org.scalatest.WordSpec
 import akka.util.ByteString
 import akka.stream.stage._
 import akka.http.scaladsl.model._
@@ -16,8 +15,10 @@ import akka.http.impl.util._
 import akka.testkit._
 import headers._
 import HttpMethods.POST
+import com.github.ghik.silencer.silent
+import org.scalatest.wordspec.AnyWordSpec
 
-class DecoderSpec extends WordSpec with CodecSpecSupport {
+class DecoderSpec extends AnyWordSpec with CodecSpecSupport {
 
   "A Decoder" should {
     "not transform the message if it doesn't contain a Content-Encoding header" in {
@@ -35,11 +36,12 @@ class DecoderSpec extends WordSpec with CodecSpecSupport {
   def dummyDecompress(s: String): String = dummyDecompress(ByteString(s, "UTF8")).decodeString("UTF8")
   def dummyDecompress(bytes: ByteString): ByteString = DummyDecoder.decode(bytes).awaitResult(3.seconds.dilated)
 
+  @silent("is internal API")
   case object DummyDecoder extends StreamDecoder {
     val encoding = HttpEncodings.compress
 
-    override def newDecompressorStage(maxBytesPerChunk: Int): () ⇒ GraphStage[FlowShape[ByteString, ByteString]] =
-      () ⇒ new SimpleLinearGraphStage[ByteString] {
+    override def newDecompressorStage(maxBytesPerChunk: Int): () => GraphStage[FlowShape[ByteString, ByteString]] =
+      () => new SimpleLinearGraphStage[ByteString] {
         override def createLogic(inheritedAttributes: Attributes): GraphStageLogic = new GraphStageLogic(shape) {
           setHandler(in, new InHandler {
             override def onPush(): Unit = push(out, grab(in) ++ ByteString("compressed"))

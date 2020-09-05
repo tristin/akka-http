@@ -1,22 +1,23 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.engine.ws
 
 import akka.http.scaladsl.model.ws._
+import akka.http.scaladsl.model.AttributeKeys.webSocketUpgrade
 import akka.stream.scaladsl.{ Flow, Keep, Sink, Source }
 import akka.stream.testkit.Utils
 import akka.util.ByteString
-import org.scalatest.{ FreeSpec, Matchers }
 import akka.http.impl.engine.server.HttpServerTestSetupBase
+import akka.http.impl.util.AkkaSpecWithMaterializer
 
 import scala.concurrent.duration._
 
-class WebSocketServerSpec extends FreeSpec with Matchers with WithMaterializerSpec { spec ⇒
+class WebSocketServerSpec extends AkkaSpecWithMaterializer { spec =>
 
-  "The server-side WebSocket integration should" - {
-    "establish a websocket connection when the user requests it" - {
+  "The server-side WebSocket integration should" should {
+    "establish a websocket connection when the user requests it" should {
       "when user handler instantly tries to send messages" in Utils.assertAllStagesStopped {
         new TestSetup {
           send(
@@ -31,11 +32,11 @@ class WebSocketServerSpec extends FreeSpec with Matchers with WithMaterializerSp
               |""")
 
           val request = expectRequest()
-          val upgrade = request.header[UpgradeToWebSocket]
+          val upgrade = request.attribute(webSocketUpgrade)
           upgrade.isDefined shouldBe true
 
           val source =
-            Source(List(1, 2, 3, 4, 5)).map(num ⇒ TextMessage.Strict(s"Message $num"))
+            Source(List(1, 2, 3, 4, 5)).map(num => TextMessage.Strict(s"Message $num"))
           val handler = Flow.fromSinkAndSourceMat(Sink.ignore, source)(Keep.none)
           val response = upgrade.get.handleMessages(handler)
           responses.sendNext(response)
@@ -77,7 +78,7 @@ class WebSocketServerSpec extends FreeSpec with Matchers with WithMaterializerSp
               |""")
 
           val request = expectRequest()
-          val upgrade = request.header[UpgradeToWebSocket]
+          val upgrade = request.attribute(webSocketUpgrade)
           upgrade.isDefined shouldBe true
 
           val response = upgrade.get.handleMessages(Flow[Message]) // simple echoing
@@ -112,7 +113,7 @@ class WebSocketServerSpec extends FreeSpec with Matchers with WithMaterializerSp
         }
       }
     }
-    "send Ping keep-alive heartbeat" - {
+    "send Ping keep-alive heartbeat" should {
       "on idle websocket connection" in Utils.assertAllStagesStopped {
         new TestSetup {
 
@@ -136,7 +137,7 @@ class WebSocketServerSpec extends FreeSpec with Matchers with WithMaterializerSp
               |""")
 
           val request = expectRequest()
-          val upgrade = request.header[UpgradeToWebSocket]
+          val upgrade = request.attribute(webSocketUpgrade)
 
           val handler = Flow.fromSinkAndSourceCoupled(Sink.ignore, Source.maybe[Message])
 
@@ -165,7 +166,7 @@ class WebSocketServerSpec extends FreeSpec with Matchers with WithMaterializerSp
       }
     }
     "prevent the selection of an unavailable subprotocol" in pending
-    "reject invalid WebSocket handshakes" - {
+    "reject invalid WebSocket handshakes" should {
       "missing `Upgrade: websocket` header" in pending
       "missing `Connection: upgrade` header" in pending
       "missing `Sec-WebSocket-Key header" in pending

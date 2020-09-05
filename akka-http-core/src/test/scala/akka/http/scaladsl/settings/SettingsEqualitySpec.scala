@@ -1,27 +1,17 @@
 /*
- * Copyright (C) 2017-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2017-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.settings
 
+import com.github.ghik.silencer.silent
 import com.typesafe.config.ConfigFactory
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
 
-import org.scalatest.Matchers
-import org.scalatest.WordSpec
+class SettingsEqualitySpec extends AnyWordSpec with Matchers {
 
-class SettingsEqualitySpec extends WordSpec with Matchers {
-
-  val config = ConfigFactory.parseString("""
-    akka.http.routing {
-      verbose-error-messages = off
-      file-get-conditional = on
-      render-vanity-footer = yes
-      range-coalescing-threshold = 80
-      range-count-limit = 16
-      decode-max-bytes-per-chunk = 1m
-      file-io-dispatcher = ${akka.stream.blocking-io-dispatcher}
-    }
-  """).withFallback(ConfigFactory.load).resolve
+  val config = ConfigFactory.load.resolve
 
   "equality" should {
     "hold for ConnectionPoolSettings" in {
@@ -32,13 +22,13 @@ class SettingsEqualitySpec extends WordSpec with Matchers {
       s1.toString should startWith("ConnectionPoolSettings(")
     }
 
-    "hold for ParserSettings" in {
+    "hold for ParserSettings.forServer" in {
       val s1 = ParserSettings(config)
       val s2 = ParserSettings(config)
 
       s1 shouldBe s2
       s1.toString should startWith("ParserSettings(")
-    }
+    }: @silent("apply in object ParserSettings is deprecated")
 
     "hold for ClientConnectionSettings" in {
       val s1 = ClientConnectionSettings(config)
@@ -46,14 +36,6 @@ class SettingsEqualitySpec extends WordSpec with Matchers {
 
       s1 shouldBe s2
       s1.toString should startWith("ClientConnectionSettings(")
-    }
-
-    "hold for RoutingSettings" in {
-      val s1 = RoutingSettings(config)
-      val s2 = RoutingSettings(config)
-
-      s1 shouldBe s2
-      s1.toString should startWith("RoutingSettings(")
     }
 
     "hold for ServerSettings" in {

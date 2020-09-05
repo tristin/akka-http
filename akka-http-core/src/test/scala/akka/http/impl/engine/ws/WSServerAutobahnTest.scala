@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.engine.ws
@@ -10,9 +10,10 @@ import scala.concurrent.Await
 import scala.concurrent.duration._
 import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
-import akka.http.scaladsl.model.HttpMethods._
-import akka.http.scaladsl.model.ws.{ Message, UpgradeToWebSocket }
 import akka.http.scaladsl.model._
+import akka.http.scaladsl.model.AttributeKeys.webSocketUpgrade
+import akka.http.scaladsl.model.HttpMethods._
+import akka.http.scaladsl.model.ws.Message
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.Flow
 
@@ -27,24 +28,21 @@ object WSServerAutobahnTest extends App {
   val mode = System.getProperty("akka.ws-mode", "read") // read or sleep
 
   try {
-    val binding = Http().bindAndHandleSync(
-      {
-        case req @ HttpRequest(GET, Uri.Path("/"), _, _, _) if req.header[UpgradeToWebSocket].isDefined ⇒
-          req.header[UpgradeToWebSocket] match {
-            case Some(upgrade) ⇒ upgrade.handleMessages(echoWebSocketService) // needed for running the autobahn test suite
-            case None          ⇒ HttpResponse(400, entity = "Not a valid websocket request!")
-          }
-        case _: HttpRequest ⇒ HttpResponse(404, entity = "Unknown resource!")
-      },
-      interface = host, // adapt to your docker host IP address if necessary
-      port = port)
+    val binding = Http().newServerAt(host, port).bindSync({
+      case req @ HttpRequest(GET, Uri.Path("/"), _, _, _) if req.attribute(webSocketUpgrade).isDefined =>
+        req.attribute(webSocketUpgrade) match {
+          case Some(upgrade) => upgrade.handleMessages(echoWebSocketService) // needed for running the autobahn test suite
+          case None          => HttpResponse(400, entity = "Not a valid websocket request!")
+        }
+      case _: HttpRequest => HttpResponse(404, entity = "Unknown resource!")
+    })
 
     Await.result(binding, 3.second) // throws if binding fails
     println(s"Server online at http://$host:$port")
     mode match {
-      case "sleep" ⇒ while (true) Thread.sleep(1.minute.toMillis)
-      case "read"  ⇒ StdIn.readLine("Press RETURN to stop...")
-      case _       ⇒ throw new Exception("akka.ws-mode MUST be sleep or read.")
+      case "sleep" => while (true) Thread.sleep(1.minute.toMillis)
+      case "read"  => StdIn.readLine("Press RETURN to stop...")
+      case _       => throw new Exception("akka.ws-mode MUST be sleep or read.")
     }
   } finally {
     system.terminate()

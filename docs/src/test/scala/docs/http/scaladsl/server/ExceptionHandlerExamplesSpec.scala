@@ -1,8 +1,13 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package docs.http.scaladsl.server
+
+import akka.http.scaladsl.server.ExceptionHandler
+import akka.http.scaladsl.server.RoutingSpec
+import docs.CompileOnlySpec
+import com.github.ghik.silencer.silent
 
 // format: OFF
 
@@ -15,7 +20,6 @@ object MyExplicitExceptionHandler {
   import StatusCodes._
   import akka.http.scaladsl.server._
   import Directives._
-  import akka.stream.ActorMaterializer
 
   val myExceptionHandler = ExceptionHandler {
     case _: ArithmeticException =>
@@ -28,7 +32,6 @@ object MyExplicitExceptionHandler {
   object MyApp extends App {
 
     implicit val system = ActorSystem()
-    implicit val materializer = ActorMaterializer()
 
     val route: Route =
       handleExceptions(myExceptionHandler) {
@@ -36,7 +39,7 @@ object MyExplicitExceptionHandler {
         null // #hide
       }
 
-    Http().bindAndHandle(route, "localhost", 8080)
+    Http().newServerAt("localhost", 8080).bind(route)
   }
 
   //#explicit-handler-example
@@ -51,7 +54,6 @@ object MyImplicitExceptionHandler {
   import StatusCodes._
   import akka.http.scaladsl.server._
   import Directives._
-  import akka.stream.ActorMaterializer
 
   implicit def myExceptionHandler: ExceptionHandler =
     ExceptionHandler {
@@ -65,18 +67,47 @@ object MyImplicitExceptionHandler {
   object MyApp extends App {
 
     implicit val system = ActorSystem()
-    implicit val materializer = ActorMaterializer()
 
     val route: Route =
     // ... some route structure
       null // #hide
 
-    Http().bindAndHandle(route, "localhost", 8080)
+    Http().newServerAt("localhost", 8080).bind(route)
   }
 
   //#implicit-handler-example
 }
 
+@silent("Evaluation of a constant expression results in an arithmetic error")
+object ExceptionHandlerInSealExample {
+  //#seal-handler-example
+  import akka.http.scaladsl.model.HttpResponse
+  import akka.http.scaladsl.model.StatusCodes._
+  import akka.http.scaladsl.server._
+  import Directives._
+
+  object SealedRouteWithCustomExceptionHandler {
+
+    implicit def myExceptionHandler: ExceptionHandler =
+      ExceptionHandler {
+        case _: ArithmeticException =>
+          extractUri { uri =>
+            println(s"Request to $uri could not be handled normally")
+            complete(HttpResponse(InternalServerError, entity = "Bad numbers, bad result!!!"))
+          }
+      }
+
+    val route: Route = Route.seal(
+      path("divide") {
+        complete((1 / 0).toString) //Will throw ArithmeticException
+      }
+    ) // this one takes `myExceptionHandler` implicitly
+
+  }
+  //#seal-handler-example
+}
+
+@silent("Evaluation of a constant expression results in an arithmetic error")
 object RespondWithHeaderExceptionHandlerExample {
   //#respond-with-header-exceptionhandler-example
   import akka.actor.ActorSystem
@@ -86,12 +117,11 @@ object RespondWithHeaderExceptionHandlerExample {
   import akka.http.scaladsl.server._
   import Directives._
   import akka.http.scaladsl.Http
-  import akka.stream.ActorMaterializer
   import RespondWithHeaderExceptionHandler.route
 
 
   object RespondWithHeaderExceptionHandler {
-    implicit def myExceptionHandler: ExceptionHandler =
+    def myExceptionHandler: ExceptionHandler =
       ExceptionHandler {
         case _: ArithmeticException =>
           extractUri { uri =>
@@ -121,15 +151,14 @@ object RespondWithHeaderExceptionHandlerExample {
 
   object MyApp extends App {
     implicit val system = ActorSystem()
-    implicit val materializer = ActorMaterializer()
 
-    Http().bindAndHandle(route, "localhost", 8080)
+    Http().newServerAt("localhost", 8080).bind(route)
   }
   //#respond-with-header-exceptionhandler-example
 }
 
-
-class ExceptionHandlerExamplesSpec extends RoutingSpec {
+@silent("Evaluation of a constant expression results in an arithmetic error")
+class ExceptionHandlerExamplesSpec extends RoutingSpec with CompileOnlySpec {
 
   "test explicit example" in {
     // tests:
@@ -157,5 +186,29 @@ class ExceptionHandlerExamplesSpec extends RoutingSpec {
       header("X-Outer-Header") shouldEqual Some(RawHeader("X-Outer-Header", "outer"))
       responseAs[String] shouldEqual "Bad numbers, bad result!!!"
     }
+  }
+
+  "test sealed route" in {
+    import ExceptionHandlerInSealExample.SealedRouteWithCustomExceptionHandler.route
+
+    Get("/divide") ~> route ~> check {
+      responseAs[String] shouldEqual "Bad numbers, bad result!!!"
+    }
+  }
+
+  "do not include possibly-sensitive details in the error response" in {
+    //#no-exception-details-in-response
+    import akka.http.scaladsl.model.IllegalHeaderException
+
+    val route = get {
+      throw IllegalHeaderException("Value of header Foo was illegal", "Found illegal value \"<script>alert('evil_xss_or_xsrf_reflection')</script>\"")
+    }
+
+    // Test:
+    Get("/") ~> route ~> check {
+      responseAs[String] should include("header Foo was illegal")
+      responseAs[String] shouldNot include("evil_xss_or_xsrf_reflection")
+    }
+    //#no-exception-details-in-response
   }
 }

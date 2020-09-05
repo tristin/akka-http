@@ -1,12 +1,14 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.engine.ws
 
 import akka.annotation.InternalApi
+import akka.http.impl.engine.server.InternalCustomHeader
 import akka.http.scaladsl.model.HttpResponse
 import akka.http.scaladsl.model.ws.UpgradeToWebSocket
+import akka.http.scaladsl.model.ws.WebSocketUpgrade
 import akka.stream.{ FlowShape, Graph }
 
 /**
@@ -15,7 +17,7 @@ import akka.stream.{ FlowShape, Graph }
  * INTERNAL API
  */
 @InternalApi
-private[http] abstract class UpgradeToWebSocketLowLevel extends InternalCustomHeader("UpgradeToWebSocket") with UpgradeToWebSocket {
+private[http] abstract class UpgradeToWebSocketLowLevel extends InternalCustomHeader("UpgradeToWebSocket") with UpgradeToWebSocket with WebSocketUpgrade {
   /**
    * The low-level interface to create WebSocket server based on "frames".
    * The user needs to handle control frames manually in this case.

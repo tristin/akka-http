@@ -1,11 +1,12 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.javadsl.unmarshalling
 
 import java.util.concurrent.CompletionStage
 
+import akka.actor.ClassicActorSystemProvider
 import akka.annotation.InternalApi
 import akka.http.impl.model.JavaQuery
 import akka.http.impl.util.JavaMapping
@@ -16,13 +17,13 @@ import akka.http.scaladsl.unmarshalling
 import akka.http.scaladsl.unmarshalling.FromEntityUnmarshaller
 import akka.http.scaladsl.unmarshalling.Unmarshaller.{ EnhancedFromEntityUnmarshaller, UnsupportedContentTypeException }
 import akka.http.scaladsl.util.FastFuture
-import akka.stream.Materializer
+import akka.stream.{ Materializer, SystemMaterializer }
 import akka.util.ByteString
+import com.github.ghik.silencer.silent
 
 import scala.collection.JavaConverters._
 import scala.compat.java8.FutureConverters._
 import scala.concurrent.ExecutionContext
-import scala.language.implicitConversions
 
 object Unmarshaller extends akka.http.javadsl.unmarshalling.Unmarshallers {
   implicit def fromScala[A, B](scalaUnmarshaller: unmarshalling.Unmarshaller[A, B]): Unmarshaller[A, B] =
@@ -40,14 +41,14 @@ object Unmarshaller extends akka.http.javadsl.unmarshalling.Unmarshallers {
    * Creates an unmarshaller from an asynchronous Java function.
    */
   override def async[A, B](f: java.util.function.Function[A, CompletionStage[B]]): Unmarshaller[A, B] =
-    unmarshalling.Unmarshaller[A, B] { ctx ⇒ a ⇒ f(a).toScala
+    unmarshalling.Unmarshaller[A, B] { ctx => a => f(a).toScala
     }
 
   /**
    * Creates an unmarshaller from a Java function.
    */
   override def sync[A, B](f: java.util.function.Function[A, B]): Unmarshaller[A, B] =
-    unmarshalling.Unmarshaller[A, B] { ctx ⇒ a ⇒ scala.concurrent.Future.successful(f.apply(a))
+    unmarshalling.Unmarshaller[A, B] { ctx => a => scala.concurrent.Future.successful(f.apply(a))
     }
 
   // format: OFF
@@ -66,19 +67,19 @@ object Unmarshaller extends akka.http.javadsl.unmarshalling.Unmarshallers {
     unmarshalling.Unmarshaller.strict[HttpRequest, RequestEntity](_.entity)
 
   def forMediaType[B](t: MediaType, um: Unmarshaller[HttpEntity, B]): Unmarshaller[HttpEntity, B] = {
-    unmarshalling.Unmarshaller.withMaterializer[HttpEntity, B] { implicit ex ⇒ implicit mat ⇒ jEntity ⇒ {
+    unmarshalling.Unmarshaller.withMaterializer[HttpEntity, B] { implicit ex => implicit mat => jEntity => {
       val entity = jEntity.asScala
       val mediaType = t.asScala
       if (entity.contentType == ContentTypes.NoContentType || mediaType.matches(entity.contentType.mediaType)) {
         um.asScala(entity)
-      } else FastFuture.failed(UnsupportedContentTypeException(ContentTypeRange(t.toRange.asScala)))
+      } else FastFuture.failed(UnsupportedContentTypeException(Some(entity.contentType), ContentTypeRange(t.toRange.asScala)))
     }
     }
   }
 
   def forMediaTypes[B](types: java.lang.Iterable[MediaType], um: Unmarshaller[HttpEntity, B]): Unmarshaller[HttpEntity, B] = {
     val u: FromEntityUnmarshaller[B] = um.asScala
-    val theTypes: Seq[akka.http.scaladsl.model.ContentTypeRange] = types.asScala.toSeq.map { media ⇒
+    val theTypes: Seq[akka.http.scaladsl.model.ContentTypeRange] = types.asScala.toSeq.map { media =>
       akka.http.scaladsl.model.ContentTypeRange(media.asScala)
     }
     u.forContentTypes(theTypes: _*)
@@ -100,6 +101,7 @@ object Unmarshaller extends akka.http.javadsl.unmarshalling.Unmarshallers {
     unmarshalling.Unmarshaller.firstOf(u1.asScala, u2.asScala, u3.asScala, u4.asScala, u5.asScala)
   }
 
+  @silent("parameter value mi in method adaptInputToJava is never used")
   private implicit def adaptInputToJava[JI, SI, O](um: unmarshalling.Unmarshaller[SI, O])(implicit mi: JavaMapping[JI, SI]): unmarshalling.Unmarshaller[JI, O] =
     um.asInstanceOf[unmarshalling.Unmarshaller[JI, O]] // since guarantee provided by existence of `mi`
 
@@ -130,6 +132,17 @@ abstract class Unmarshaller[-A, B] extends UnmarshallerBase[A, B] {
   def unmarshal(value: A, mat: Materializer): CompletionStage[B] = unmarshal(value, mat.executionContext, mat)
 
   /**
+   * Apply this Unmarshaller to the given value.
+   */
+  def unmarshal(value: A, ec: ExecutionContext, system: ClassicActorSystemProvider): CompletionStage[B] = unmarshal(value, ec, SystemMaterializer(system).materializer)
+
+  /**
+   * Apply this Unmarshaller to the given value. Uses the default materializer [[ExecutionContext]].
+   * If you expect the marshalling to be heavy, it is suggested to provide a specialized context for those operations.
+   */
+  def unmarshal(value: A, system: ClassicActorSystemProvider): CompletionStage[B] = unmarshal(value, system.classicSystem.dispatcher, SystemMaterializer(system).materializer)
+
+  /**
    * Transform the result `B` of this unmarshaller to a `C` producing a marshaller that turns `A`s into `C`s
    *
    * @return A new marshaller that can unmarshall instances of `A` into instances of `C`
@@ -137,15 +150,15 @@ abstract class Unmarshaller[-A, B] extends UnmarshallerBase[A, B] {
   def thenApply[C](f: java.util.function.Function[B, C]): Unmarshaller[A, C] = asScala.map(f.apply)
 
   def flatMap[C](f: java.util.function.Function[B, CompletionStage[C]]): Unmarshaller[A, C] =
-    asScala.flatMap { ctx ⇒ mat ⇒ b ⇒ f.apply(b).toScala }
+    asScala.flatMap { ctx => mat => b => f.apply(b).toScala }
 
   def flatMap[C](u: Unmarshaller[_ >: B, C]): Unmarshaller[A, C] =
-    asScala.flatMap { ctx ⇒ mat ⇒ b ⇒ u.asScala.apply(b)(ctx, mat) }
+    asScala.flatMap { ctx => mat => b => u.asScala.apply(b)(ctx, mat) }
 
   // TODO not exposed for Java yet
   //  def mapWithInput[C](f: java.util.function.BiFunction[A, B, C]): Unmarshaller[A, C] =
-  //    asScala.mapWithInput { case (a, b) ⇒ f.apply(a, b) }
+  //    asScala.mapWithInput { case (a, b) => f.apply(a, b) }
   //
   //  def flatMapWithInput[C](f: java.util.function.BiFunction[A, B, CompletionStage[C]]): Unmarshaller[A, C] =
-  //    asScala.flatMapWithInput { case (a, b) ⇒ f.apply(a, b).toScala }
+  //    asScala.flatMapWithInput { case (a, b) => f.apply(a, b).toScala }
 }

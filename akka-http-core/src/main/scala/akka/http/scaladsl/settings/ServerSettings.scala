@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2017-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.settings
@@ -7,14 +7,15 @@ package akka.http.scaladsl.settings
 import java.util.Random
 import java.util.function.Supplier
 
-import akka.annotation.DoNotInherit
-import akka.http.impl.util._
+import akka.actor.ActorSystem
+import akka.annotation.{ DoNotInherit, InternalApi }
+import akka.http.ParsingErrorHandler
 import akka.http.impl.settings.ServerSettingsImpl
+import akka.http.impl.util._
 import akka.http.impl.util.JavaMapping.Implicits._
-import akka.http.javadsl.{ settings ⇒ js }
+import akka.http.javadsl.{ settings => js }
 import akka.http.scaladsl.model.HttpResponse
-import akka.http.scaladsl.model.headers.Host
-import akka.http.scaladsl.model.headers.Server
+import akka.http.scaladsl.model.headers.{ Host, Server }
 import akka.io.Inet.SocketOption
 import com.typesafe.config.Config
 
@@ -28,13 +29,15 @@ import scala.language.implicitConversions
  * Public API but not intended for subclassing
  */
 @DoNotInherit
-abstract class ServerSettings private[akka] () extends akka.http.javadsl.settings.ServerSettings { self: ServerSettingsImpl ⇒
+abstract class ServerSettings private[akka] () extends akka.http.javadsl.settings.ServerSettings { self: ServerSettingsImpl =>
   def serverHeader: Option[Server]
   def previewServerSettings: PreviewServerSettings
   def timeouts: ServerSettings.Timeouts
   def maxConnections: Int
   def pipeliningLimit: Int
+  @deprecated("use remote-address-attribute instead", since = "10.2.0")
   def remoteAddressHeader: Boolean
+  def remoteAddressAttribute: Boolean
   def rawRequestUriHeader: Boolean
   def transparentHeadRequests: Boolean
   def verboseErrorMessages: Boolean
@@ -43,7 +46,7 @@ abstract class ServerSettings private[akka] () extends akka.http.javadsl.setting
   def socketOptions: immutable.Seq[SocketOption]
   def defaultHostHeader: Host
   @Deprecated @deprecated("Kept for binary compatibility; Use websocketSettings.randomFactory instead", since = "10.1.1")
-  def websocketRandomFactory: () ⇒ Random
+  def websocketRandomFactory: () => Random
   def websocketSettings: WebSocketSettings
   def parserSettings: ParserSettings
   def logUnencryptedNetworkBytes: Option[Int]
@@ -51,6 +54,8 @@ abstract class ServerSettings private[akka] () extends akka.http.javadsl.setting
   def defaultHttpPort: Int
   def defaultHttpsPort: Int
   def terminationDeadlineExceededResponse: HttpResponse
+  def parsingErrorHandler: String
+  def streamCancellationDelay: FiniteDuration
 
   /* Java APIs */
 
@@ -68,7 +73,9 @@ abstract class ServerSettings private[akka] () extends akka.http.javadsl.setting
   override def getTimeouts = timeouts
   override def getRawRequestUriHeader = rawRequestUriHeader
   override def getRemoteAddressHeader = remoteAddressHeader
+  override def getRemoteAddressAttribute: Boolean = remoteAddressAttribute
   override def getLogUnencryptedNetworkBytes = OptionConverters.toJava(logUnencryptedNetworkBytes)
+  @Deprecated @deprecated("Kept for binary compatibility; Use websocketSettings.getRandomFactory instead", since = "10.2.0")
   override def getWebsocketRandomFactory = new Supplier[Random] {
     override def get(): Random = websocketRandomFactory()
   }
@@ -76,6 +83,8 @@ abstract class ServerSettings private[akka] () extends akka.http.javadsl.setting
   override def getDefaultHttpsPort: Int = defaultHttpsPort
   override def getTerminationDeadlineExceededResponse: akka.http.javadsl.model.HttpResponse =
     terminationDeadlineExceededResponse
+  override def getParsingErrorHandler: String = parsingErrorHandler
+  override def getStreamCancellationDelay: FiniteDuration = streamCancellationDelay
   // ---
 
   // override for more specific return type
@@ -83,12 +92,14 @@ abstract class ServerSettings private[akka] () extends akka.http.javadsl.setting
   override def withMaxConnections(newValue: Int): ServerSettings = self.copy(maxConnections = newValue)
   override def withPipeliningLimit(newValue: Int): ServerSettings = self.copy(pipeliningLimit = newValue)
   override def withRemoteAddressHeader(newValue: Boolean): ServerSettings = self.copy(remoteAddressHeader = newValue)
+  override def withRemoteAddressAttribute(newValue: Boolean): ServerSettings = self.copy(remoteAddressAttribute = newValue)
   override def withRawRequestUriHeader(newValue: Boolean): ServerSettings = self.copy(rawRequestUriHeader = newValue)
   override def withTransparentHeadRequests(newValue: Boolean): ServerSettings = self.copy(transparentHeadRequests = newValue)
   override def withVerboseErrorMessages(newValue: Boolean): ServerSettings = self.copy(verboseErrorMessages = newValue)
   override def withResponseHeaderSizeHint(newValue: Int): ServerSettings = self.copy(responseHeaderSizeHint = newValue)
   override def withBacklog(newValue: Int): ServerSettings = self.copy(backlog = newValue)
   override def withSocketOptions(newValue: java.lang.Iterable[SocketOption]): ServerSettings = self.copy(socketOptions = newValue.asScala.toList)
+  @Deprecated @deprecated("Kept for binary compatibility; Use websocketSettings.withRandomFactoryFactory instead", since = "10.2.0")
   override def withWebsocketRandomFactory(newValue: java.util.function.Supplier[Random]): ServerSettings = self.copy(websocketSettings = websocketSettings.withRandomFactoryFactory(new Supplier[Random] {
     override def get(): Random = newValue.get()
   }))
@@ -97,6 +108,8 @@ abstract class ServerSettings private[akka] () extends akka.http.javadsl.setting
   override def withDefaultHttpsPort(newValue: Int): ServerSettings = self.copy(defaultHttpsPort = newValue)
   override def withTerminationDeadlineExceededResponse(response: akka.http.javadsl.model.HttpResponse): ServerSettings =
     self.copy(terminationDeadlineExceededResponse = response.asScala)
+  override def withParsingErrorHandler(newValue: String) = self.copy(parsingErrorHandler = newValue)
+  override def withStreamCancellationDelay(newValue: FiniteDuration): ServerSettings = self.copy(streamCancellationDelay = newValue)
 
   // overloads for Scala idiomatic use
   def withTimeouts(newValue: ServerSettings.Timeouts): ServerSettings = self.copy(timeouts = newValue)
@@ -104,12 +117,28 @@ abstract class ServerSettings private[akka] () extends akka.http.javadsl.setting
   def withLogUnencryptedNetworkBytes(newValue: Option[Int]): ServerSettings = self.copy(logUnencryptedNetworkBytes = newValue)
   def withDefaultHostHeader(newValue: Host): ServerSettings = self.copy(defaultHostHeader = newValue)
   def withParserSettings(newValue: ParserSettings): ServerSettings = self.copy(parserSettings = newValue)
-  def withWebsocketRandomFactory(newValue: () ⇒ Random): ServerSettings = self.copy(websocketSettings = websocketSettings.withRandomFactoryFactory(new Supplier[Random] {
+  @Deprecated @deprecated("Kept for binary compatibility; Use websocketSettings.withRandomFactoryFactory instead", since = "10.2.0")
+  def withWebsocketRandomFactory(newValue: () => Random): ServerSettings = self.copy(websocketSettings = websocketSettings.withRandomFactoryFactory(new Supplier[Random] {
     override def get(): Random = newValue()
   }))
   def withWebsocketSettings(newValue: WebSocketSettings): ServerSettings = self.copy(websocketSettings = newValue)
   def withSocketOptions(newValue: immutable.Seq[SocketOption]): ServerSettings = self.copy(socketOptions = newValue)
+  def withHttp2Settings(newValue: Http2ServerSettings): ServerSettings = copy(http2Settings = newValue)
 
+  // Scala-only lenses
+  def mapHttp2Settings(f: Http2ServerSettings => Http2ServerSettings): ServerSettings = withHttp2Settings(f(http2Settings))
+  def mapParserSettings(f: ParserSettings => ParserSettings): ServerSettings = withParserSettings(f(parserSettings))
+  def mapPreviewServerSettings(f: PreviewServerSettings => PreviewServerSettings): ServerSettings = withPreviewServerSettings(f(previewServerSettings))
+  def mapWebsocketSettings(f: WebSocketSettings => WebSocketSettings): ServerSettings = withWebsocketSettings(f(websocketSettings))
+  def mapTimeouts(f: ServerSettings.Timeouts => ServerSettings.Timeouts): ServerSettings = withTimeouts(f(timeouts))
+
+  /**
+   * INTERNAL API
+   *
+   * Returns an instance of the ParsingErrorHandler as specified by `parsingErrorHandler`
+   */
+  @InternalApi
+  private[http] def parsingErrorHandlerInstance(system: ActorSystem): ParsingErrorHandler
 }
 
 object ServerSettings extends SettingsCompanion[ServerSettings] {
@@ -130,8 +159,8 @@ object ServerSettings extends SettingsCompanion[ServerSettings] {
   object LogUnencryptedNetworkBytes {
     def apply(string: String): Option[Int] =
       string.toRootLowerCase match {
-        case "off" ⇒ None
-        case value ⇒ Option(value.toInt)
+        case "off" => None
+        case value => Option(value.toInt)
       }
   }
 }

@@ -1,11 +1,12 @@
 # The PathMatcher DSL
 
-For being able to work with the @ref[PathDirectives](directives/path-directives/index.md) effectively you should have some understanding of the
-`PathMatcher` mini-DSL that Akka HTTP provides for elegantly defining URI matching behavior.
+The `PathMatcher` mini-DSL is used to match incoming URL's and extract values from them. It is used in the @ref[`path` directive](directives/path-directives/path.md).
+
+Some simple examples of the DSL in action can be found [below](#examples).
 
 ## Overview
 
-When a request (or rather the respective @unidoc[RequestContext] instance) enters the route structure it has an
+When a request (or rather the respective @apidoc[RequestContext] instance) enters the route structure it has an
 "unmatched path" that is identical to the `request.uri.path`. As it descends the routing tree and passes through one
 or more @ref[pathPrefix](directives/path-directives/pathPrefix.md) or @ref[path](directives/path-directives/path.md) directives the "unmatched path" progressively gets "eaten into" from the
 left until, in most cases, it eventually has been consumed completely.
@@ -50,8 +51,8 @@ This will match paths like `foo/bar/X42/edit` or @scala[`foo/bar/X/create`]@java
 
 @@@ note
 The path matching DSL describes what paths to accept **after** URL decoding. This is why the path-separating
-slashes have special status and cannot simply be specified as part of a string! The string "foo/bar" would match
-the raw URI path "foo%2Fbar", which is most likely not what you want!
+slashes have special status and cannot simply be specified as part of a string! **The string "foo/bar" would match
+the raw URI path "foo%2Fbar"**, which is most likely not what you want!
 @@@
 
 
@@ -144,7 +145,7 @@ If the given prefix is empty the returned matcher matches always and consumes no
 A path matcher is a description of a part of a path to match. The simplest path matcher is `PathMatcher.segment` which
 matches exactly one path segment against the supplied constant string.
 
-Other path matchers defined in @unidoc[PathMatchers] match the end of the path (`PathMatchers.END`), a single slash
+Other path matchers defined in @apidoc[PathMatchers] match the end of the path (`PathMatchers.END`), a single slash
 (`PathMatchers.SLASH`), or nothing at all (`PathMatchers.NEUTRAL`).
 
 Many path matchers are hybrids that can both match (by using them with one of the PathDirectives) and extract values,
@@ -158,7 +159,7 @@ PathMatchers.segment(String)
 Note that strings are interpreted as the decoded representation of the path, so if they include a '/' character
 this character will match "%2F" in the encoded raw URI!
 
-PathMatchers.regex
+PathMatchers.segment(java.util.regex.Pattern)
 : You can use a regular expression instance as a path matcher, which matches whatever the regex matches and extracts
 one `String` value. A `PathMatcher` created from a regular expression extracts either the complete match (if the
 regex doesn't contain a capture group) or the capture group (if the regex contains exactly one capture group).
@@ -215,18 +216,18 @@ Path matchers can be combined with these combinators to form higher-level constr
 
 Tilde Operator (`~`)
 : The tilde is the most basic combinator. It simply concatenates two matchers into one, i.e if the first one matched
-(and consumed) the second one is tried. The extractions of both matchers are combined type-safely.
+(and consumed) the second one is tried. The extractions of both matchers are combined type-safely. This is an alias for the `append` method.
 For example: `"foo" ~ "bar"` yields a matcher that is identical to `"foobar"`.
 
 Slash Operator (`/`)
-: This operator concatenates two matchers and inserts a `Slash` matcher in between them.
+: This operator concatenates two matchers and inserts a `Slash` matcher in between them. This is an alias for the `slash` method.
 For example: `"foo" / "bar"` is identical to `"foo" ~ Slash ~ "bar"`.
 
 Pipe Operator (`|`)
 : This operator combines two matcher alternatives in that the second one is only tried if the first one did *not* match.
-The two sub-matchers must have compatible types.
+The two sub-matchers must have compatible types. This is an alias for the `or` method.
 For example: `"foo" | "bar"` will match either "foo" *or* "bar".
-When combining an alternative expressed using this operator with an `/` operator, make sure to surround the alternative with parentheses, like so: `("foo" | "bar") / "bom"`. Otherwise, the `/` operator takes precendence and would only apply to the right-hand side of the alternative.
+When combining an alternative expressed using this operator with an `/` operator, make sure to surround the alternative with parentheses, like so: `("foo" | "bar") / "bom"`. Otherwise, the `/` operator takes precedence and would only apply to the right-hand side of the alternative.
 
 ## Modifiers
 
@@ -234,19 +235,19 @@ Path matcher instances can be transformed with these modifier methods:
 
 /
 : The slash operator cannot only be used as combinator for combining two matcher instances, it can also be used as
-a postfix call. `matcher /` is identical to `matcher ~ Slash` but shorter and easier to read.
+a postfix call. `matcher /` is identical to `matcher ~ Slash` but shorter and easier to read. This is an alias for the `slash` method.
 
 ?
 :
 By postfixing a matcher with `?` you can turn any `PathMatcher` into one that always matches, optionally consumes
-and potentially extracts an `Option` of the underlying matchers extraction. The result type depends on the type
+and potentially extracts an `Option` of the underlying matchers extraction. This is an alias for the `optional` method. The result type depends on the type
 of the underlying matcher:
 
 |If a `matcher` is of type | then `matcher.?` is of type|
 |--------------------------|----------------------------|
-|`PathMatcher0`          | `PathMatcher0`          |
-|`PathMatcher1[T]`       | `PathMatcher1[Option[T]`|
-|`PathMatcher[L: Tuple]` | `PathMatcher[Option[L]]`|
+|`PathMatcher0`          | `PathMatcher0`           |
+|`PathMatcher1[T]`       | `PathMatcher1[Option[T]]`|
+|`PathMatcher[L: Tuple]` | `PathMatcher[Option[L]]` |
 
 repeat(separator: PathMatcher0 = PathMatchers.Neutral)
 :
@@ -256,13 +257,13 @@ extractions. The result type depends on the type of the underlying matcher:
 
 |If a `matcher` is of type | then `matcher.repeat(...)` is of type|
 |--------------------------|--------------------------------------|
-|`PathMatcher0`          | `PathMatcher0`        |
-|`PathMatcher1[T]`       | `PathMatcher1[List[T]`|
-|`PathMatcher[L: Tuple]` | `PathMatcher[List[L]]`|
+|`PathMatcher0`          | `PathMatcher0`         |
+|`PathMatcher1[T]`       | `PathMatcher1[List[T]]`|
+|`PathMatcher[L: Tuple]` | `PathMatcher[List[L]]` |
 
 unary_!
 : By prefixing a matcher with `!` it can be turned into a `PathMatcher0` that only matches if the underlying matcher
-does *not* match and vice versa.
+does *not* match and vice versa. This is the operator alternative to the `not` method.
 
 transform / (h)flatMap / (h)map
 : These modifiers allow you to append your own "post-application" logic to another matcher in order to form a custom

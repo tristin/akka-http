@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package docs.http.javadsl.server;
@@ -21,8 +21,8 @@ import akka.http.javadsl.model.ws.WebSocketRequest;
 import akka.http.javadsl.settings.ClientConnectionSettings;
 import akka.http.javadsl.settings.ServerSettings;
 import akka.http.javadsl.settings.WebSocketSettings;
-import akka.japi.Function;
 import akka.japi.JavaPartialFunction;
+import akka.japi.function.Function;
 
 import akka.stream.ActorMaterializer;
 import akka.stream.Materializer;
@@ -59,12 +59,11 @@ public class WebSocketCoreExample {
     ActorSystem system = ActorSystem.create();
 
     try {
-      final Materializer materializer = ActorMaterializer.create(system);
-
       final Function<HttpRequest, HttpResponse> handler = request -> handleRequest(request);
       CompletionStage<ServerBinding> serverBindingFuture =
-        Http.get(system).bindAndHandleSync(
-          handler, ConnectHttp.toHost("localhost", 8080), materializer);
+          Http.get(system)
+              .newServerAt("localhost", 8080)
+              .bindSync(handler);
 
       // will throw if binding fails
       serverBindingFuture.toCompletableFuture().get(1, TimeUnit.SECONDS);
@@ -113,7 +112,6 @@ public class WebSocketCoreExample {
 
   {
     ActorSystem system = null;
-    ActorMaterializer materializer = null;
     Flow<HttpRequest, HttpResponse, NotUsed> handler = null;
     //#websocket-ping-payload-server
     ServerSettings defaultSettings = ServerSettings.create(system);
@@ -129,11 +127,9 @@ public class WebSocketCoreExample {
     ServerSettings customServerSettings = defaultSettings.withWebsocketSettings(customWebsocketSettings);
 
     Http http = Http.get(system);
-    http.bindAndHandle(handler,
-        ConnectHttp.toHost("127.0.0.1"),
-        customServerSettings, // pass the configuration
-        system.log(),
-        materializer);
+    http.newServerAt("127.0.0.1", 8080)
+        .withSettings(customServerSettings)
+        .bindFlow(handler);
     //#websocket-ping-payload-server
   }
 

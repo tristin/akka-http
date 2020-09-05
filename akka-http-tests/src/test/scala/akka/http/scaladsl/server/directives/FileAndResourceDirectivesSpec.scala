@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.server
@@ -30,9 +30,8 @@ class FileAndResourceDirectivesSpec extends RoutingSpec with Inspectors with Ins
   val testRoot = new File("akka-http-tests/src/test/resources")
   require(testRoot.exists(), s"testRoot was not found at ${testRoot.getAbsolutePath}")
 
-  override def testConfigSource = """
+  override def testConfigSource = super.testConfigSource ++ """
     akka.http.routing.range-coalescing-threshold = 1
-    akka.loggers = ["akka.testkit.TestEventListener"]
   """
 
   def writeAllText(text: String, file: File): Unit =
@@ -163,7 +162,7 @@ class FileAndResourceDirectivesSpec extends RoutingSpec with Inspectors with Ins
             }
           }
         } catch {
-          case err: AssertionError ⇒ throw new AssertionError(s"Failure for prefix $prefix", err)
+          case err: AssertionError => throw new AssertionError(s"Failure for prefix $prefix", err)
         }
 
       shouldReject("../")
@@ -245,9 +244,9 @@ class FileAndResourceDirectivesSpec extends RoutingSpec with Inspectors with Ins
       def runCheck() =
         Get() ~> route ~> check {
           mediaType shouldEqual `text/html`
-          forAtLeast(1, headers) { h ⇒
+          forAtLeast(1, headers) { h =>
             inside(h) {
-              case `Last-Modified`(dt) ⇒
+              case `Last-Modified`(dt) =>
                 DateTime(2011, 7, 1) should be < dt
                 dt.clicks should be < System.currentTimeMillis()
             }
@@ -325,10 +324,10 @@ class FileAndResourceDirectivesSpec extends RoutingSpec with Inspectors with Ins
     val base = new File(getClass.getClassLoader.getResource("").toURI).getPath
     new File(base, "subDirectory/emptySub").mkdir()
     def eraseDateTime(s: String) = s.replaceAll("""\d\d\d\d-\d\d-\d\d \d\d:\d\d:\d\d""", "xxxx-xx-xx xx:xx:xx")
-    implicit val settings = RoutingSettings.default.withRenderVanityFooter(false)
+    val settings = RoutingSettings.default.withRenderVanityFooter(false)
 
     "properly render a simple directory" in {
-      Get() ~> listDirectoryContents(base + "/someDir") ~> check {
+      Get() ~> withSettings(settings)(listDirectoryContents(base + "/someDir")) ~> check {
         eraseDateTime(responseAs[String]) shouldEqual prep {
           """<html>
             |<head><title>Index of /</title></head>
@@ -348,7 +347,7 @@ class FileAndResourceDirectivesSpec extends RoutingSpec with Inspectors with Ins
       }
     }
     "properly render a sub directory" in {
-      Get("/sub/") ~> listDirectoryContents(base + "/someDir") ~> check {
+      Get("/sub/") ~> withSettings(settings)(listDirectoryContents(base + "/someDir")) ~> check {
         eraseDateTime(responseAs[String]) shouldEqual prep {
           """<html>
             |<head><title>Index of /sub/</title></head>
@@ -367,7 +366,7 @@ class FileAndResourceDirectivesSpec extends RoutingSpec with Inspectors with Ins
       }
     }
     "properly render the union of several directories" in {
-      Get() ~> listDirectoryContents(base + "/someDir", base + "/subDirectory") ~> check {
+      Get() ~> withSettings(settings)(listDirectoryContents(base + "/someDir", base + "/subDirectory")) ~> check {
         eraseDateTime(responseAs[String]) shouldEqual prep {
           """<html>
             |<head><title>Index of /</title></head>
@@ -389,7 +388,6 @@ class FileAndResourceDirectivesSpec extends RoutingSpec with Inspectors with Ins
       }
     }
     "properly render an empty sub directory with vanity footer" in {
-      val settings = 0 // shadow implicit
       Get("/emptySub/") ~> listDirectoryContents(base + "/subDirectory") ~> check {
         eraseDateTime(responseAs[String]) shouldEqual prep {
           """<html>
@@ -411,7 +409,7 @@ class FileAndResourceDirectivesSpec extends RoutingSpec with Inspectors with Ins
       }
     }
     "properly render an empty top-level directory" in {
-      Get() ~> listDirectoryContents(base + "/subDirectory/emptySub") ~> check {
+      Get() ~> withSettings(settings)(listDirectoryContents(base + "/subDirectory/emptySub")) ~> check {
         eraseDateTime(responseAs[String]) shouldEqual prep {
           """<html>
             |<head><title>Index of /</title></head>
@@ -429,7 +427,7 @@ class FileAndResourceDirectivesSpec extends RoutingSpec with Inspectors with Ins
       }
     }
     "properly render a simple directory with a path prefix" in {
-      Get("/files/") ~> pathPrefix("files")(listDirectoryContents(base + "/someDir")) ~> check {
+      Get("/files/") ~> withSettings(settings)(pathPrefix("files")(listDirectoryContents(base + "/someDir"))) ~> check {
         eraseDateTime(responseAs[String]) shouldEqual prep {
           """<html>
             |<head><title>Index of /files/</title></head>
@@ -449,7 +447,7 @@ class FileAndResourceDirectivesSpec extends RoutingSpec with Inspectors with Ins
       }
     }
     "properly render a sub directory with a path prefix" in {
-      Get("/files/sub/") ~> pathPrefix("files")(listDirectoryContents(base + "/someDir")) ~> check {
+      Get("/files/sub/") ~> withSettings(settings)(pathPrefix("files")(listDirectoryContents(base + "/someDir"))) ~> check {
         eraseDateTime(responseAs[String]) shouldEqual prep {
           """<html>
             |<head><title>Index of /files/sub/</title></head>
@@ -468,7 +466,7 @@ class FileAndResourceDirectivesSpec extends RoutingSpec with Inspectors with Ins
       }
     }
     "properly render an empty top-level directory with a path prefix" in {
-      Get("/files/") ~> pathPrefix("files")(listDirectoryContents(base + "/subDirectory/emptySub")) ~> check {
+      Get("/files/") ~> withSettings(settings)(pathPrefix("files")(listDirectoryContents(base + "/subDirectory/emptySub"))) ~> check {
         eraseDateTime(responseAs[String]) shouldEqual prep {
           """<html>
             |<head><title>Index of /files/</title></head>
@@ -492,7 +490,7 @@ class FileAndResourceDirectivesSpec extends RoutingSpec with Inspectors with Ins
     "reject path traversal attempts" in {
       def _listDirectoryContents(directory: String) = listDirectoryContents(new File(testRoot, directory).getCanonicalPath)
       def route(uri: String) =
-        mapRequestContext(_.withUnmatchedPath(Path("/" + uri)).mapRequest(_.copy(uri = "/" + uri))) {
+        mapRequestContext(_.withUnmatchedPath(Path("/" + uri)).mapRequest(_.withUri("/" + uri))) {
           _listDirectoryContents("someDir/sub")
         }
 
@@ -508,7 +506,7 @@ class FileAndResourceDirectivesSpec extends RoutingSpec with Inspectors with Ins
             }
           }
         } catch {
-          case err: AssertionError ⇒ throw new AssertionError(s"Failure for prefix $prefix", err)
+          case err: AssertionError => throw new AssertionError(s"Failure for prefix $prefix", err)
         }
 
       shouldReject("../") // resolved

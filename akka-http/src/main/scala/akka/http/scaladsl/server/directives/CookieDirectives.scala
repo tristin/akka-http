@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.server
@@ -36,9 +36,9 @@ trait CookieDirectives {
   def optionalCookie(name: String): Directive1[Option[HttpCookiePair]] =
     optionalHeaderValue(findCookie(name))
 
-  private def findCookie(name: String): HttpHeader ⇒ Option[HttpCookiePair] = {
-    case Cookie(cookies) ⇒ cookies.find(_.name == name)
-    case _               ⇒ None
+  private def findCookie(name: String): HttpHeader => Option[HttpCookiePair] = {
+    case Cookie(cookies) => cookies.find(_.name == name)
+    case _               => None
   }
 
   /**
@@ -55,8 +55,8 @@ trait CookieDirectives {
    * @group cookie
    */
   def deleteCookie(first: HttpCookie, more: HttpCookie*): Directive0 =
-    respondWithHeaders((first :: more.toList).map { c ⇒
-      `Set-Cookie`(c.copy(value = "deleted", expires = Some(DateTime.MinValue)))
+    respondWithHeaders((first :: more.toList).map { c =>
+      `Set-Cookie`(c.withValue("deleted").withExpires(DateTime.MinValue))
     })
 
   /**

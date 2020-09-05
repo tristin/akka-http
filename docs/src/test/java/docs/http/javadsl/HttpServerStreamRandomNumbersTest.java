@@ -1,19 +1,19 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package docs.http.javadsl;
 
 //#stream-random-numbers
 import akka.NotUsed;
-import akka.actor.ActorSystem;
+import akka.actor.typed.ActorSystem;
+import akka.actor.typed.javadsl.Behaviors;
 import akka.http.javadsl.ConnectHttp;
 import akka.http.javadsl.Http;
 import akka.http.javadsl.ServerBinding;
 import akka.http.javadsl.model.*;
 import akka.http.javadsl.server.AllDirectives;
 import akka.http.javadsl.server.Route;
-import akka.stream.ActorMaterializer;
 import akka.stream.javadsl.Flow;
 import akka.stream.javadsl.Source;
 import akka.util.ByteString;
@@ -26,17 +26,16 @@ public class HttpServerStreamRandomNumbersTest extends AllDirectives {
 
   public static void main(String[] args) throws Exception {
     // boot up server using the route as defined below
-    ActorSystem system = ActorSystem.create("routes");
+    ActorSystem<Void> system = ActorSystem.create(Behaviors.empty(), "routes");
 
     final Http http = Http.get(system);
-    final ActorMaterializer materializer = ActorMaterializer.create(system);
 
     //In order to access all directives we need an instance where the routes are define.
     HttpServerStreamRandomNumbersTest app = new HttpServerStreamRandomNumbersTest();
 
-    final Flow<HttpRequest, HttpResponse, NotUsed> routeFlow = app.createRoute().flow(system, materializer);
-    final CompletionStage<ServerBinding> binding = http.bindAndHandle(routeFlow,
-        ConnectHttp.toHost("localhost", 8080), materializer);
+    final CompletionStage<ServerBinding> binding =
+        http.newServerAt("localhost", 8080)
+                .bind(app.createRoute());
 
     System.out.println("Server online at http://localhost:8080/\nPress RETURN to stop...");
     System.in.read(); // let it run until user presses return
@@ -53,7 +52,7 @@ public class HttpServerStreamRandomNumbersTest extends AllDirectives {
     // and use it for every request
     Source<Integer, NotUsed> numbers = Source.fromIterator(() -> Stream.generate(rnd::nextInt).iterator());
 
-    return route(
+    return concat(
         path("random", () ->
             get(() ->
                 complete(HttpEntities.create(ContentTypes.TEXT_PLAIN_UTF8,

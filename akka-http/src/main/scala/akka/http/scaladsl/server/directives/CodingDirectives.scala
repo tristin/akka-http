@@ -1,17 +1,18 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.server
 package directives
 
 import scala.collection.immutable
-import scala.util.control.NonFatal
 import akka.http.scaladsl.model.headers.{ HttpEncoding, HttpEncodings }
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.coding._
 import akka.stream.scaladsl.Flow
 import akka.util.ByteString
+
+import scala.util.control.NonFatal
 
 /**
  * @groupname coding Coding directives
@@ -32,7 +33,7 @@ trait CodingDirectives {
    * @group coding
    */
   def responseEncodingAccepted(encoding: HttpEncoding): Directive0 =
-    extractRequest.flatMap { request ⇒
+    extractRequest.flatMap { request =>
       if (EncodingNegotiator(request.headers).isAccepted(encoding)) pass
       else reject(UnacceptedResponseEncodingRejection(Set(encoding)))
     }
@@ -75,21 +76,20 @@ trait CodingDirectives {
    * @group coding
    */
   def decodeRequestWith(decoder: Decoder): Directive0 = {
-    def applyDecoder =
-      if (decoder == NoCoding) pass
+    def applyDecoder: Directive0 =
+      if (decoder == Coders.NoCoding) pass
       else
-        extractSettings flatMap { settings ⇒
+        extractSettings flatMap { settings =>
           val effectiveDecoder = decoder.withMaxBytesPerChunk(settings.decodeMaxBytesPerChunk)
-          mapRequest { request ⇒
-            effectiveDecoder.decodeMessage(request).mapEntity { entity ⇒
-              entity.transformDataBytes(Flow[ByteString].recover {
-                case NonFatal(e) ⇒
-                  throw IllegalRequestException(
+          mapRequest { msg =>
+            effectiveDecoder.decodeMessage(msg)
+              .transformEntityDataBytes(Flow[ByteString].mapError {
+                case NonFatal(e) =>
+                  IllegalRequestException(
                     StatusCodes.BadRequest,
                     ErrorInfo("The request's encoding is corrupt", e.getMessage))
               })
-            }
-          }
+          } & withSizeLimit(settings.decodeMaxSize)
         }
 
     requestEntityEmpty | (
@@ -105,8 +105,8 @@ trait CodingDirectives {
    */
   def requestEncodedWith(encoding: HttpEncoding): Directive0 =
     extract(_.request.encoding).flatMap {
-      case `encoding` ⇒ pass
-      case _          ⇒ reject(UnsupportedRequestEncodingRejection(encoding))
+      case `encoding` => pass
+      case _          => reject(UnsupportedRequestEncodingRejection(encoding))
     }
 
   /**
@@ -137,16 +137,17 @@ trait CodingDirectives {
    * @group coding
    */
   def withPrecompressedMediaTypeSupport: Directive0 =
-    mapResponse { response ⇒
+    mapResponse { response =>
       if (response.entity.contentType.mediaType.comp != MediaType.Gzipped) response
       else response.withDefaultHeaders(headers.`Content-Encoding`(HttpEncodings.gzip))
     }
 }
 
 object CodingDirectives extends CodingDirectives {
-  val DefaultCoders: immutable.Seq[Coder] = immutable.Seq(Gzip, Deflate, NoCoding)
+  def DefaultCoders: immutable.Seq[Coder] = Coders.DefaultCoders
 
-  private[http] val DefaultEncodeResponseEncoders = immutable.Seq(NoCoding, Gzip, Deflate)
+  // same entries as DefaultCoders but in different order
+  private[http] val DefaultEncodeResponseEncoders = immutable.Seq(Coders.NoCoding, Coders.Gzip, Coders.Deflate)
 
   def theseOrDefault[T >: Coder](these: Seq[T]): Seq[T] = if (these.isEmpty) DefaultCoders else these
 
@@ -154,14 +155,14 @@ object CodingDirectives extends CodingDirectives {
   import RouteDirectives._
 
   private def _encodeResponse(encoders: immutable.Seq[Encoder]): Directive0 =
-    BasicDirectives.extractRequest.flatMap { request ⇒
+    BasicDirectives.extractRequest.flatMap { request =>
       val negotiator = EncodingNegotiator(request.headers)
-      val encodings: List[HttpEncoding] = encoders.map(_.encoding)(collection.breakOut)
-      val bestEncoder = negotiator.pickEncoding(encodings).flatMap(be ⇒ encoders.find(_.encoding == be))
+      val encodings: List[HttpEncoding] = encoders.map(_.encoding).toList
+      val bestEncoder = negotiator.pickEncoding(encodings).flatMap(be => encoders.find(_.encoding == be))
       bestEncoder match {
-        case Some(encoder) ⇒ mapResponse(encoder.encodeMessage(_))
-        case _ ⇒
-          if (encoders.contains(NoCoding) && !negotiator.hasMatchingFor(HttpEncodings.identity)) pass
+        case Some(encoder) => mapResponse(encoder.encodeMessage(_))
+        case _ =>
+          if (encoders.contains(Coders.NoCoding) && !negotiator.hasMatchingFor(HttpEncodings.identity)) pass
           else reject(UnacceptedResponseEncodingRejection(encodings.toSet))
       }
     }

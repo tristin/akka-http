@@ -1,19 +1,22 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl
 
-import akka.NotUsed
-
 import scala.concurrent.duration._
 import scala.concurrent.Await
+
+import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.http.scaladsl.model._
+import akka.http.scaladsl.model.AttributeKeys.webSocketUpgrade
 import akka.http.scaladsl.model.ws._
 import akka.stream._
 import akka.stream.scaladsl.{ Flow, Source }
+
 import com.typesafe.config.{ Config, ConfigFactory }
+
 import HttpMethods._
 
 import scala.io.StdIn
@@ -35,22 +38,21 @@ object TestServer extends App {
     .withInputBuffer(128, 128)
   implicit val fm = ActorMaterializer(settings)
   try {
-    val binding = Http().bindAndHandleSync({
-      case req @ HttpRequest(GET, Uri.Path("/"), _, _, _) if req.header[UpgradeToWebSocket].isDefined ⇒
-        req.header[UpgradeToWebSocket] match {
-          case Some(upgrade) ⇒ upgrade.handleMessages(echoWebSocketService) // needed for running the autobahn test suite
-          case None          ⇒ HttpResponse(400, entity = "Not a valid websocket request!")
+    val binding = Http().newServerAt("localhost", 9001).bindSync {
+      case req @ HttpRequest(GET, Uri.Path("/"), _, _, _) =>
+        req.attribute(webSocketUpgrade) match {
+          case Some(upgrade) => upgrade.handleMessages(echoWebSocketService) // needed for running the autobahn test suite
+          case None          => index
         }
-      case HttpRequest(GET, Uri.Path("/"), _, _, _)      ⇒ index
-      case HttpRequest(GET, Uri.Path("/ping"), _, _, _)  ⇒ HttpResponse(entity = "PONG!")
-      case HttpRequest(GET, Uri.Path("/crash"), _, _, _) ⇒ sys.error("BOOM!")
-      case req @ HttpRequest(GET, Uri.Path("/ws-greeter"), _, _, _) ⇒
-        req.header[UpgradeToWebSocket] match {
-          case Some(upgrade) ⇒ upgrade.handleMessages(greeterWebSocketService)
-          case None          ⇒ HttpResponse(400, entity = "Not a valid websocket request!")
+      case HttpRequest(GET, Uri.Path("/ping"), _, _, _)  => HttpResponse(entity = "PONG!")
+      case HttpRequest(GET, Uri.Path("/crash"), _, _, _) => sys.error("BOOM!")
+      case req @ HttpRequest(GET, Uri.Path("/ws-greeter"), _, _, _) =>
+        req.attribute(webSocketUpgrade) match {
+          case Some(upgrade) => upgrade.handleMessages(greeterWebSocketService)
+          case None          => HttpResponse(400, entity = "Not a valid websocket request!")
         }
-      case _: HttpRequest ⇒ HttpResponse(404, entity = "Unknown resource!")
-    }, interface = "localhost", port = 9001)
+      case _: HttpRequest => HttpResponse(404, entity = "Unknown resource!")
+    }
 
     Await.result(binding, 1.second) // throws if binding fails
     println("Server online at http://localhost:9001")
@@ -82,8 +84,8 @@ object TestServer extends App {
   def greeterWebSocketService: Flow[Message, Message, NotUsed] =
     Flow[Message]
       .collect {
-        case TextMessage.Strict(name) ⇒ TextMessage(s"Hello '$name'")
-        case tm: TextMessage          ⇒ TextMessage(Source.single("Hello ") ++ tm.textStream)
+        case TextMessage.Strict(name) => TextMessage(s"Hello '$name'")
+        case tm: TextMessage          => TextMessage(Source.single("Hello ") ++ tm.textStream)
         // ignore binary messages
       }
 }

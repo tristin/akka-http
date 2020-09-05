@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl
@@ -11,11 +11,13 @@ import akka.stream.scaladsl._
 import akka.stream.{ OverflowStrategy, ActorMaterializer }
 import com.typesafe.config.{ Config, ConfigFactory }
 import org.scalatest.concurrent.ScalaFutures
-import org.scalatest.{ BeforeAndAfterAll, Matchers, WordSpec }
+import org.scalatest.BeforeAndAfterAll
 import scala.concurrent.duration._
 import akka.testkit._
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
 
-class TightRequestTimeoutSpec extends WordSpec with Matchers with BeforeAndAfterAll with ScalaFutures {
+class TightRequestTimeoutSpec extends AnyWordSpec with Matchers with BeforeAndAfterAll with ScalaFutures {
   val testConf: Config = ConfigFactory.parseString("""
     akka.loggers = ["akka.testkit.TestEventListener"]
     akka.loglevel = ERROR
@@ -25,7 +27,6 @@ class TightRequestTimeoutSpec extends WordSpec with Matchers with BeforeAndAfter
     akka.http.server.request-timeout = 10ms""")
 
   implicit val system = ActorSystem(getClass.getSimpleName, testConf)
-  import system.dispatcher
   implicit val materializer = ActorMaterializer()
   implicit val patience = PatienceConfig(3.seconds.dilated)
 
@@ -33,10 +34,10 @@ class TightRequestTimeoutSpec extends WordSpec with Matchers with BeforeAndAfter
 
   "Tight request timeout" should {
 
-    "not cause double push error caused by the late response attemting to push" in {
-      val (hostname, port) = SocketUtil.temporaryServerHostnameAndPort()
-      val slowHandler = Flow[HttpRequest].map(_ ⇒ HttpResponse()).delay(500.millis.dilated, OverflowStrategy.backpressure)
-      val binding = Http().bindAndHandle(slowHandler, hostname, port)
+    "not cause double push error caused by the late response attempting to push" in {
+      val slowHandler = Flow[HttpRequest].map(_ => HttpResponse()).delay(500.millis.dilated, OverflowStrategy.backpressure)
+      val binding = Http().newServerAt("localhost", 0).bindFlow(slowHandler).futureValue
+      val (hostname, port) = (binding.localAddress.getHostString, binding.localAddress.getPort)
 
       val p = TestProbe()
       system.eventStream.subscribe(p.ref, classOf[Logging.Error])
@@ -46,7 +47,7 @@ class TightRequestTimeoutSpec extends WordSpec with Matchers with BeforeAndAfter
 
       p.expectNoMessage(1.second) // here the double push might happen
 
-      binding.flatMap(_.unbind()).futureValue
+      binding.unbind().futureValue
     }
 
   }

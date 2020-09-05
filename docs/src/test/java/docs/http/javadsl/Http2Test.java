@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2018-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package docs.http.javadsl;
@@ -8,24 +8,23 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 
 import akka.actor.ActorSystem;
-import akka.japi.Function;
 import akka.http.javadsl.HttpsConnectionContext;
 import akka.http.javadsl.model.HttpRequest;
 import akka.http.javadsl.model.HttpResponse;
+import akka.japi.function.Function;
 import akka.stream.ActorMaterializer;
 import akka.stream.Materializer;
 
-//#bindAndHandleAsync
+//#bindAndHandleSecure
 import akka.http.javadsl.Http;
 import static akka.http.javadsl.ConnectHttp.toHostHttps;
 
-//#bindAndHandleAsync
+//#bindAndHandleSecure
 
-//#bindAndHandleWithoutNegotiation
-import akka.http.javadsl.UseHttp2;
+//#bindAndHandlePlain
 import static akka.http.javadsl.ConnectHttp.toHost;
 
-//#bindAndHandleWithoutNegotiation
+//#bindAndHandlePlain
 
 class Http2Test {
   void testBindAndHandleAsync() {
@@ -34,20 +33,17 @@ class Http2Test {
     Materializer materializer = ActorMaterializer.create(system);
     HttpsConnectionContext httpsConnectionContext = null;
 
-    //#bindAndHandleAsync
+    //#bindAndHandleSecure
     Http.get(system)
-      .bindAndHandleAsync(
-        asyncHandler,
-        toHostHttps("127.0.0.1", 8443).withCustomHttpsContext(httpsConnectionContext),
-        materializer);
-    //#bindAndHandleAsync
+      .newServerAt("127.0.0.1", 8443)
+      .enableHttps(httpsConnectionContext)
+      .bind(asyncHandler);
+    //#bindAndHandleSecure
 
-    //#bindAndHandleWithoutNegotiation
+    //#bindAndHandlePlain
     Http.get(system)
-      .bindAndHandleAsync(
-        asyncHandler,
-        toHost("127.0.0.1", 8080, UseHttp2.always()),
-        materializer);
-    //#bindAndHandleWithoutNegotiation
+      .newServerAt("127.0.0.1", 8443)
+      .bind(asyncHandler);
+    //#bindAndHandlePlain
   }
 }

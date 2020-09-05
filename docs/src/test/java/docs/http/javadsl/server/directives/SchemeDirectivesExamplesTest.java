@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2015-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package docs.http.javadsl.server.directives;
@@ -21,7 +21,6 @@ import static akka.http.javadsl.server.Directives.extractScheme;
 import static akka.http.javadsl.server.Directives.complete;
 import static akka.http.javadsl.server.Directives.extract;
 import static akka.http.javadsl.server.Directives.redirect;
-import static akka.http.javadsl.server.Directives.route;
 import static akka.http.javadsl.server.Directives.scheme;
 
 //#scheme
@@ -31,7 +30,7 @@ public class SchemeDirectivesExamplesTest extends JUnitRouteTest {
   @Test
   public void testScheme() {
     //#extractScheme
-    final Route route = extractScheme((scheme) -> 
+    final Route route = extractScheme((scheme) ->
                                       complete(String.format("The scheme is '%s'", scheme)));
     testRoute(route).run(HttpRequest.GET("https://www.example.com/"))
       .assertEntity("The scheme is 'https'");
@@ -41,7 +40,7 @@ public class SchemeDirectivesExamplesTest extends JUnitRouteTest {
   @Test
   public void testRedirection() {
     //#scheme
-    final Route route = route(
+    final Route route = concat(
       scheme("http", ()->
         extract((ctx) -> ctx.getRequest().getUri(), (uri)->
           redirect(uri.scheme("https"), StatusCodes.MOVED_PERMANENTLY)

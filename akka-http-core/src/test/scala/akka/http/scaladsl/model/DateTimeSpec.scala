@@ -1,15 +1,16 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.model
 
 import java.util.TimeZone
 import scala.util.Random
-import org.scalatest.{ Matchers, WordSpec }
 import org.scalatest.matchers.{ Matcher, MatchResult }
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
 
-class DateTimeSpec extends WordSpec with Matchers {
+class DateTimeSpec extends AnyWordSpec with Matchers {
 
   val GMT = TimeZone.getTimeZone("GMT")
   val specificClicks = DateTime(2011, 7, 12, 14, 8, 12).clicks
@@ -32,7 +33,7 @@ class DateTimeSpec extends WordSpec with Matchers {
         fmt
       }
       def rfc1123Format(dt: DateTime) = Rfc1123Format.format(new java.util.Date(dt.clicks))
-      val matchSimpleDateFormat: Matcher[DateTime] = Matcher { dt: DateTime ⇒
+      val matchSimpleDateFormat: Matcher[DateTime] = Matcher { dt: DateTime =>
         MatchResult(
           dt.toRfc1123DateTimeString == rfc1123Format(dt),
           dt.toRfc1123DateTimeString + " != " + rfc1123Format(dt),
@@ -78,7 +79,7 @@ class DateTimeSpec extends WordSpec with Matchers {
   "The two DateTime implementations" should {
     "allow for transparent round-trip conversions" in {
       def roundTrip(dt: DateTime) = DateTime(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
-      val roundTripOk: Matcher[DateTime] = Matcher { dt: DateTime ⇒
+      val roundTripOk: Matcher[DateTime] = Matcher { dt: DateTime =>
         MatchResult(
           { val rt = roundTrip(dt); dt == rt && dt.weekday == rt.weekday },
           dt.toRfc1123DateTimeString + " != " + roundTrip(dt).toRfc1123DateTimeString,

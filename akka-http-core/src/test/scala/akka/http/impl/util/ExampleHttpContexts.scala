@@ -1,23 +1,28 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.util
 
 import java.io.InputStream
-import java.security.{ SecureRandom, KeyStore }
-import java.security.cert.{ CertificateFactory, Certificate }
-import javax.net.ssl.{ SSLParameters, SSLContext, TrustManagerFactory, KeyManagerFactory }
+import java.net.InetSocketAddress
+import java.security.{ KeyStore, SecureRandom }
+import java.security.cert.{ Certificate, CertificateFactory }
 
-import akka.http.scaladsl.HttpsConnectionContext
+import akka.actor.ActorSystem
+import javax.net.ssl.{ KeyManagerFactory, SSLContext, TrustManagerFactory }
+import akka.http.scaladsl.{ ClientTransport, Http, ConnectionContext }
 import akka.http.impl.util.JavaMapping.Implicits._
+import akka.http.scaladsl.settings.ClientConnectionSettings
+import akka.stream.scaladsl.Flow
+import akka.util.ByteString
+
+import scala.concurrent.Future
 
 /**
  * These are HTTPS example configurations that take key material from the resources/key folder.
  */
 object ExampleHttpContexts {
-
-  // TODO show example how to obtain pre-configured context from ssl-config
 
   def getExampleServerContext() = exampleServerContext.asJava
 
@@ -34,7 +39,7 @@ object ExampleHttpContexts {
     val context = SSLContext.getInstance("TLS")
     context.init(keyManagerFactory.getKeyManagers, null, new SecureRandom)
 
-    new HttpsConnectionContext(context)
+    ConnectionContext.httpsServer(context)
   }
 
   val exampleClientContext = {
@@ -46,12 +51,9 @@ object ExampleHttpContexts {
     val certManagerFactory = TrustManagerFactory.getInstance("SunX509")
     certManagerFactory.init(certStore)
 
-    val context = SSLContext.getInstance("TLS")
+    val context = SSLContext.getInstance("TLSv1.2")
     context.init(null, certManagerFactory.getTrustManagers, new SecureRandom)
-
-    val params = new SSLParameters()
-    params.setEndpointIdentificationAlgorithm("https")
-    new HttpsConnectionContext(context, sslParameters = Some(params))
+    ConnectionContext.httpsClient(context)
   }
 
   def resourceStream(resourceName: String): InputStream = {
@@ -62,4 +64,14 @@ object ExampleHttpContexts {
 
   def loadX509Certificate(resourceName: String): Certificate =
     CertificateFactory.getInstance("X.509").generateCertificate(resourceStream(resourceName))
+
+  /**
+   * A client transport that will rewrite the target address to a fixed address. This can be used
+   * to pretend to connect to akka.example.org which is required to connect to the example server certificate.
+   */
+  def proxyTransport(realAddress: InetSocketAddress): ClientTransport =
+    new ClientTransport {
+      override def connectTo(host: String, port: Int, settings: ClientConnectionSettings)(implicit system: ActorSystem): Flow[ByteString, ByteString, Future[Http.OutgoingConnection]] =
+        ClientTransport.TCP.connectTo(realAddress.getHostString, realAddress.getPort, settings)
+    }
 }

@@ -1,21 +1,19 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package docs.http.scaladsl.server.directives
 
 import scala.concurrent.duration._
-
 import akka.util.ByteString
-
 import akka.stream.OverflowStrategy
-import akka.stream.scaladsl.{ Sink, Source, Flow }
-
-import docs.http.scaladsl.server.RoutingSpec
-import akka.http.scaladsl.model.ws.{ TextMessage, Message, BinaryMessage }
+import akka.stream.scaladsl.{ Flow, Sink, Source }
+import akka.http.scaladsl.model.ws.{ BinaryMessage, Message, TextMessage }
+import akka.http.scaladsl.server.RoutingSpec
 import akka.http.scaladsl.testkit.WSProbe
+import docs.CompileOnlySpec
 
-class WebSocketDirectivesExamplesSpec extends RoutingSpec {
+class WebSocketDirectivesExamplesSpec extends RoutingSpec with CompileOnlySpec {
   "greeter-service" in {
     //#greeter-service
     def greeter: Flow[Message, Message, Any] =
@@ -107,8 +105,10 @@ class WebSocketDirectivesExamplesSpec extends RoutingSpec {
     //#handle-multiple-protocols
   }
 
-  "extractUpgradeToWebSocket" in {
-    //#extractUpgradeToWebSocket
+  "extractWebSocketUpgrade" in {
+    //#extractWebSocketUpgrade
+    import akka.http.scaladsl.model.AttributeKeys.webSocketUpgrade
+
     def echoService: Flow[Message, Message, Any] =
       Flow[Message]
         // needed because a noop flow hasn't any buffer that would start processing in tests
@@ -116,7 +116,7 @@ class WebSocketDirectivesExamplesSpec extends RoutingSpec {
 
     def route =
       path("services") {
-        extractUpgradeToWebSocket { upgrade ⇒
+        extractWebSocketUpgrade { upgrade =>
           complete(upgrade.handleMessages(echoService, Some("echo")))
         }
       }
@@ -134,7 +134,7 @@ class WebSocketDirectivesExamplesSpec extends RoutingSpec {
         wsClient.expectCompletion()
       }
     }
-    //#extractUpgradeToWebSocket
+    //#extractWebSocketUpgrade
   }
 
   "extractOfferedWsProtocols" in {

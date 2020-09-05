@@ -1,12 +1,12 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.coding
 
-import java.io.{ OutputStream, InputStream, ByteArrayInputStream, ByteArrayOutputStream }
-import java.util
+import java.io.{ ByteArrayInputStream, ByteArrayOutputStream, InputStream, OutputStream }
 import java.util.zip.DataFormatException
+
 import akka.NotUsed
 
 import scala.annotation.tailrec
@@ -14,17 +14,21 @@ import scala.concurrent.duration._
 import scala.concurrent.Await
 import scala.concurrent.ExecutionContext.Implicits.global
 import java.util.concurrent.ThreadLocalRandom
+
 import scala.util.control.NoStackTrace
-import org.scalatest.{ Inspectors, WordSpec }
+import org.scalatest.Inspectors
 import akka.util.ByteString
 import akka.stream.scaladsl.{ Sink, Source }
 import akka.http.scaladsl.model.{ HttpEntity, HttpRequest }
 import akka.http.scaladsl.model.HttpMethods._
 import akka.http.impl.util._
 import akka.testkit._
+import com.github.ghik.silencer.silent
+import org.scalatest.wordspec.AnyWordSpec
 
-abstract class CoderSpec extends WordSpec with CodecSpecSupport with Inspectors {
-  protected def Coder: Coder with StreamDecoder
+@silent("deprecated .* is internal API")
+abstract class CoderSpec extends AnyWordSpec with CodecSpecSupport with Inspectors {
+  protected def Coder: Coder
   protected def newDecodedInputStream(underlying: InputStream): InputStream
   protected def newEncodedOutputStream(underlying: OutputStream): OutputStream
 
@@ -89,8 +93,8 @@ abstract class CoderSpec extends WordSpec with CodecSpecSupport with Inspectors 
     "support chunked round-trip encoding/decoding" in {
       val chunks = largeTextBytes.grouped(512).toVector
       val comp = Coder.newCompressor
-      val compressedChunks = chunks.map { chunk ⇒ comp.compressAndFlush(chunk) } :+ comp.finish()
-      val uncompressed = decodeFromIterator(() ⇒ compressedChunks.iterator)
+      val compressedChunks = chunks.map { chunk => comp.compressAndFlush(chunk) } :+ comp.finish()
+      val uncompressed = decodeFromIterator(() => compressedChunks.iterator)
 
       uncompressed should readAs(largeText)
     }
@@ -113,20 +117,22 @@ abstract class CoderSpec extends WordSpec with CodecSpecSupport with Inspectors 
     }
 
     "shouldn't produce huge ByteStrings for some input" in {
-      val array = new Array[Byte](10) // FIXME
-      util.Arrays.fill(array, 1.toByte)
+      val array = new Array[Byte](100007)
+      val random = ThreadLocalRandom.current()
+      random.nextBytes(array)
       val compressed = streamEncode(ByteString(array))
       val limit = 10000
       val resultBs =
         Source.single(compressed)
           .via(Coder.withMaxBytesPerChunk(limit).decoderFlow)
-          .limit(4200).runWith(Sink.seq)
+          .runWith(Sink.seq)
           .awaitResult(3.seconds.dilated)
 
-      forAll(resultBs) { bs ⇒
-        bs.length should be < limit
-        bs.forall(_ == 1) should equal(true)
+      forAll(resultBs) { bs =>
+        bs.length should be <= limit
       }
+      val result = resultBs.reduce(_ ++ _)
+      result should equal(array)
     }
 
     "be able to decode chunk-by-chunk (depending on input chunks)" in {
@@ -140,7 +146,7 @@ abstract class CoderSpec extends WordSpec with CodecSpecSupport with Inspectors 
         ByteString(Array.fill(size)(1.toByte))
 
       val sizesAfterRoundtrip =
-        Source.fromIterator(() ⇒ sizes.toIterator.map(createByteString))
+        Source.fromIterator(() => sizes.toIterator.map(createByteString))
           .via(Coder.encoderFlow)
           .via(Coder.decoderFlow)
           .runFold(Seq.empty[Int])(_ :+ _.size)
@@ -152,7 +158,7 @@ abstract class CoderSpec extends WordSpec with CodecSpecSupport with Inspectors 
   }
 
   def encode(s: String) = ourEncode(ByteString(s, "UTF8"))
-  def ourEncode(bytes: ByteString): ByteString = Coder.encode(bytes)
+  def ourEncode(bytes: ByteString): ByteString = Coder.encodeAsync(bytes).awaitResult(3.seconds.dilated)
   def ourDecode(bytes: ByteString): ByteString = Coder.decode(bytes).awaitResult(3.seconds.dilated)
 
   lazy val corruptContent = {
@@ -163,7 +169,10 @@ abstract class CoderSpec extends WordSpec with CodecSpecSupport with Inspectors 
 
   def streamEncode(bytes: ByteString): ByteString = {
     val output = new ByteArrayOutputStream()
-    val gos = newEncodedOutputStream(output); gos.write(bytes.toArray); gos.close()
+    val gos = newEncodedOutputStream(output)
+    gos.write(bytes.toArray)
+    gos.flush()
+    gos.close()
     ByteString(output.toByteArray)
   }
 
@@ -187,7 +196,7 @@ abstract class CoderSpec extends WordSpec with CodecSpecSupport with Inspectors 
   def decodeChunks(input: Source[ByteString, NotUsed]): ByteString =
     input.via(Coder.decoderFlow).join.awaitResult(3.seconds.dilated)
 
-  def decodeFromIterator(iterator: () ⇒ Iterator[ByteString]): ByteString =
+  def decodeFromIterator(iterator: () => Iterator[ByteString]): ByteString =
     Await.result(Source.fromIterator(iterator).via(Coder.decoderFlow).join, 3.seconds.dilated)
 
   implicit class EnhancedThrowable(val throwable: Throwable) {

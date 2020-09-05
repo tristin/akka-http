@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.javadsl.model;
@@ -24,15 +24,6 @@ public final class HttpMethods {
     public static final HttpMethod POST    = akka.http.scaladsl.model.HttpMethods.POST();
     public static final HttpMethod PUT     = akka.http.scaladsl.model.HttpMethods.PUT();
     public static final HttpMethod TRACE   = akka.http.scaladsl.model.HttpMethods.TRACE();
-
-    /**
-     * Create a custom method type.
-     * @deprecated Use {@link #custom} instead. Will be removed in Akka HTTP 11.0.
-     */
-    @Deprecated
-    public static HttpMethod createCustom(String value, boolean safe, boolean idempotent, akka.http.javadsl.model.RequestEntityAcceptance requestEntityAcceptance) {
-        return custom(value, safe, idempotent, requestEntityAcceptance);
-    }
 
     /**
      * Create a custom method type.

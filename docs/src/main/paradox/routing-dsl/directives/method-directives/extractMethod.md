@@ -4,13 +4,13 @@
 
 ## Signature
 
-@@signature [MethodDirectives.scala]($akka-http$/akka-http/src/main/scala/akka/http/scaladsl/server/directives/MethodDirectives.scala) { #extractMethod }
+@@signature [MethodDirectives.scala](/akka-http/src/main/scala/akka/http/scaladsl/server/directives/MethodDirectives.scala) { #extractMethod }
 
 @@@
 
 ## Description
 
-Extracts the @unidoc[HttpMethod] from the request context and provides it for use for other directives explicitly.
+Extracts the @apidoc[HttpMethod] from the request context and provides it for use for other directives explicitly.
 
 ## Example
 

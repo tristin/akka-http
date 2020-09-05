@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.util
@@ -7,7 +7,7 @@ package akka.http.impl.util
 import java.net.InetAddress
 import java.util.Optional
 import java.util.concurrent.CompletionStage
-import java.{ lang ⇒ jl, util ⇒ ju }
+import java.{ lang => jl, util => ju }
 
 import akka.japi.Pair
 import akka.stream.{ FlowShape, Graph, javadsl, scaladsl }
@@ -18,9 +18,9 @@ import scala.reflect.ClassTag
 import akka.NotUsed
 import akka.annotation.InternalApi
 import akka.http.impl.model.{ JavaQuery, JavaUri }
-import akka.http.javadsl.{ ConnectionContext, HttpConnectionContext, HttpsConnectionContext, model ⇒ jm, settings ⇒ js }
-import akka.http.{ javadsl ⇒ jdsl, scaladsl ⇒ sdsl }
-import akka.http.scaladsl.{ model ⇒ sm }
+import akka.http.javadsl.{ ConnectionContext, HttpConnectionContext, HttpsConnectionContext, model => jm, settings => js }
+import akka.http.{ javadsl => jdsl, scaladsl => sdsl }
+import akka.http.scaladsl.{ model => sm }
 
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.Try
@@ -180,6 +180,8 @@ private[http] object JavaMapping {
   class Inherited[J <: AnyRef, S <: J](implicit classTag: ClassTag[S]) extends JavaMapping[J, S] {
     def toJava(scalaObject: S): J = scalaObject
     def toScala(javaObject: J): S = cast[S](javaObject)
+
+    def downcast[F[+_]](f: F[J]): F[S] = f.asInstanceOf[F[S]]
   }
 
   implicit object ConnectionContext extends Inherited[ConnectionContext, akka.http.scaladsl.ConnectionContext]
@@ -195,7 +197,6 @@ private[http] object JavaMapping {
   implicit object PreviewServerSettings extends Inherited[js.PreviewServerSettings, akka.http.scaladsl.settings.PreviewServerSettings]
   implicit object ServerSettingsT extends Inherited[js.ServerSettings.Timeouts, akka.http.scaladsl.settings.ServerSettings.Timeouts]
   implicit object Http2ServerSettingT extends Inherited[js.Http2ServerSettings, akka.http.scaladsl.settings.Http2ServerSettings]
-  implicit object PoolImplementationT extends Inherited[js.PoolImplementation, akka.http.scaladsl.settings.PoolImplementation]
   implicit object WebsocketSettings extends Inherited[js.WebSocketSettings, akka.http.scaladsl.settings.WebSocketSettings]
 
   implicit object OutgoingConnection extends JavaMapping[jdsl.OutgoingConnection, sdsl.Http.OutgoingConnection] {
@@ -212,6 +213,9 @@ private[http] object JavaMapping {
   implicit object InetSocketAddress extends Identity[java.net.InetSocketAddress]
   implicit object ByteString extends Identity[akka.util.ByteString]
 
+  implicit val AttributeKey = new Inherited[jm.AttributeKey[_], sm.AttributeKey[_]]
+  implicit def attributeKey[T]: Inherited[jm.AttributeKey[T], sm.AttributeKey[T]] =
+    AttributeKey.asInstanceOf[Inherited[jm.AttributeKey[T], sm.AttributeKey[T]]]
   implicit object ContentType extends Inherited[jm.ContentType, sm.ContentType]
   implicit object ContentTypeBinary extends Inherited[jm.ContentType.Binary, sm.ContentType.Binary]
   implicit object ContentTypeNonBinary extends Inherited[jm.ContentType.NonBinary, sm.ContentType.NonBinary]
@@ -283,7 +287,7 @@ private[http] object JavaMapping {
   private def cast[T](obj: AnyRef)(implicit classTag: ClassTag[T]): T =
     try classTag.runtimeClass.cast(obj).asInstanceOf[T]
     catch {
-      case exp: ClassCastException ⇒
+      case exp: ClassCastException =>
         throw new IllegalArgumentException(s"Illegal custom subclass of $classTag. " +
           s"Please use only the provided factories in akka.http.javadsl.model.Http")
     }

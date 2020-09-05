@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl
@@ -11,80 +11,74 @@ import akka.http.impl.util.ExampleHttpContexts
 import akka.http.scaladsl.model.HttpMethods._
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.unmarshalling.Unmarshal
-import akka.http.scaladsl.UseHttp2.Always
-import akka.stream._
 import akka.stream.scaladsl.FileIO
 import com.typesafe.config.Config
 import com.typesafe.config.ConfigFactory
 
 import scala.concurrent.Await
+import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.io.StdIn
 import scala.util.Random
 
+/**
+ * App to manually test an HTTP2 server
+ */
 object Http2ServerTest extends App {
   val testConf: Config = ConfigFactory.parseString("""
-    akka.loglevel = INFO
     akka.log-dead-letters = off
     akka.stream.materializer.debug.fuzzing-mode = off
     akka.actor.serialize-creators = off
     akka.actor.serialize-messages = off
     #akka.actor.default-dispatcher.throughput = 1000
     akka.actor.default-dispatcher.fork-join-executor.parallelism-max=8
+    akka.http.server.preview.enable-http2 = true
                                                    """)
   implicit val system = ActorSystem("ServerTest", testConf)
-  import system.dispatcher
+  implicit val ec: ExecutionContext = system.dispatcher
 
-  val settings = ActorMaterializerSettings(system)
-    .withFuzzing(false)
-    //    .withSyncProcessingLimit(Int.MaxValue)
-    .withInputBuffer(128, 128)
-  implicit val fm = ActorMaterializer(settings)
-
-  def slowDown[T](millis: Int): T ⇒ Future[T] = { t ⇒
+  def slowDown[T](millis: Int): T => Future[T] = { t =>
     akka.pattern.after(millis.millis, system.scheduler)(Future.successful(t))
   }
 
-  val syncHandler: HttpRequest ⇒ HttpResponse = {
-    case HttpRequest(GET, Uri.Path("/"), _, _, _)           ⇒ index
-    case HttpRequest(GET, Uri.Path("/ping"), _, _, _)       ⇒ HttpResponse(entity = "PONG!")
-    case HttpRequest(GET, Uri.Path("/image-page"), _, _, _) ⇒ imagePage
-    case HttpRequest(GET, Uri(_, _, p, _, _), _, _, _) if p.toString.startsWith("/image1") ⇒
+  val syncHandler: HttpRequest => HttpResponse = {
+    case HttpRequest(GET, Uri.Path("/"), _, _, _)           => index
+    case HttpRequest(GET, Uri.Path("/ping"), _, _, _)       => HttpResponse(entity = "PONG!")
+    case HttpRequest(GET, Uri.Path("/image-page"), _, _, _) => imagePage
+    case HttpRequest(GET, Uri(_, _, p, _, _), _, _, _) if p.toString.startsWith("/image1") =>
       HttpResponse(entity = HttpEntity(MediaTypes.`image/jpeg`, FileIO.fromPath(Paths.get("bigimage.jpg"), 100000).mapAsync(1)(slowDown(1))))
-    case HttpRequest(GET, Uri(_, _, p, _, _), _, _, _) if p.toString.startsWith("/image2") ⇒
+    case HttpRequest(GET, Uri(_, _, p, _, _), _, _, _) if p.toString.startsWith("/image2") =>
       HttpResponse(entity = HttpEntity(MediaTypes.`image/jpeg`, FileIO.fromPath(Paths.get("bigimage2.jpg"), 150000).mapAsync(1)(slowDown(2))))
-    case HttpRequest(GET, Uri.Path("/crash"), _, _, _) ⇒ sys.error("BOOM!")
-    case _: HttpRequest                                ⇒ HttpResponse(404, entity = "Unknown resource!")
+    case HttpRequest(GET, Uri.Path("/crash"), _, _, _) => sys.error("BOOM!")
+    case _: HttpRequest                                => HttpResponse(404, entity = "Unknown resource!")
   }
 
-  val asyncHandler: HttpRequest ⇒ Future[HttpResponse] = {
-    case HttpRequest(POST, Uri.Path("/upload"), _, entity, _) ⇒
+  val asyncHandler: HttpRequest => Future[HttpResponse] = {
+    case HttpRequest(POST, Uri.Path("/upload"), _, entity, _) =>
       Unmarshal(entity).to[Multipart.FormData]
-        .flatMap { formData ⇒
-          formData.parts.runFoldAsync("") { (msg, part) ⇒
+        .flatMap { formData =>
+          formData.parts.runFoldAsync("") { (msg, part) =>
             part.entity.dataBytes.runFold(0)(_ + _.size)
-              .map(dataSize ⇒ msg + s"${part.name} ${part.filename} $dataSize ${part.entity.contentType} ${part.additionalDispositionParams}\n")
+              .map(dataSize => msg + s"${part.name} ${part.filename} $dataSize ${part.entity.contentType} ${part.additionalDispositionParams}\n")
           }
         }
-        .map { msg ⇒
+        .map { msg =>
           HttpResponse(entity = s"Got upload: $msg")
         }
-    case req ⇒ Future.successful(syncHandler(req))
+    case req => Future.successful(syncHandler(req))
   }
 
   try {
     val bindings =
       for {
-        binding1 ← Http().bindAndHandleAsync(asyncHandler, interface = "localhost", port = 9000, ExampleHttpContexts.exampleServerContext)
-        binding2 ← Http2().bindAndHandleAsync(asyncHandler, interface = "localhost", port = 9001, ExampleHttpContexts.exampleServerContext)
-        binding3 ← Http().bindAndHandleAsync(asyncHandler, interface = "localhost", port = 9002, HttpConnectionContext(http2 = Always))
-      } yield (binding1, binding2, binding3)
+        httpsBinding <- Http().newServerAt(interface = "localhost", port = 9000).enableHttps(ExampleHttpContexts.exampleServerContext).bind(asyncHandler)
+        plainBinding <- Http().newServerAt(interface = "localhost", port = 9002).bind(asyncHandler)
+      } yield (httpsBinding, plainBinding)
 
     Await.result(bindings, 1.second) // throws if binding fails
-    println("Server (HTTP/1.1) online at https://localhost:9000")
-    println(Console.BOLD + "Server (HTTP/2) online at https://localhost:9001" + Console.RESET)
-    println(Console.BOLD + "Server (HTTP/2 without negotiation or TLS) online at https://localhost:9002" + Console.RESET)
+    println(Console.BOLD + "Server (HTTP/1.1 and HTTP/2) online at https://localhost:9000" + Console.RESET)
+    println(Console.BOLD + "Server (HTTP/1/1 and HTTP/2) online at http://localhost:9002" + Console.RESET)
     println("Press RETURN to stop...")
     StdIn.readLine()
   } finally {
@@ -116,8 +110,8 @@ object Http2ServerTest extends App {
 
   def imagesBlock = {
     def one(): String =
-      s"""<img width="80" height="60" src="/image1?cachebuster=${Random.nextInt}"></img>
-         |<img width="80" height="60" src="/image2?cachebuster=${Random.nextInt}"></img>
+      s"""<img width="80" height="60" src="/image1?cachebuster=${Random.nextInt()}"></img>
+         |<img width="80" height="60" src="/image2?cachebuster=${Random.nextInt()}"></img>
          |""".stripMargin
 
     Seq.fill(20)(one()).mkString

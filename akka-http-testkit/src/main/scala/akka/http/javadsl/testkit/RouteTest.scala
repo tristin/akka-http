@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.javadsl.testkit
@@ -12,13 +12,13 @@ import akka.actor.ActorSystem
 import akka.http.impl.util.JavaMapping.Implicits.AddAsScala
 import akka.http.javadsl.model.HttpRequest
 import akka.http.javadsl.model.headers.Host
-import akka.http.javadsl.server.AllDirectives
-import akka.http.javadsl.server.Directives
-import akka.http.javadsl.server.Route
-import akka.http.javadsl.server.RouteResult
+import akka.http.javadsl.server.{ AllDirectives, Directives, Route, RouteResult, RouteResults }
 import akka.http.scaladsl.server
-import akka.http.scaladsl.server.{ ExceptionHandler, Route ⇒ ScalaRoute }
+import akka.http.scaladsl.server.{ ExceptionHandler, Route => ScalaRoute }
+import akka.http.scaladsl.settings.ParserSettings
 import akka.http.scaladsl.settings.RoutingSettings
+import akka.http.scaladsl.settings.ServerSettings
+import akka.http.scaladsl
 import akka.http.scaladsl.util.FastFuture
 import akka.stream.Materializer
 import akka.testkit.TestDuration
@@ -34,7 +34,8 @@ abstract class RouteTest extends AllDirectives with WSTestRequestBuilding {
   implicit def materializer: Materializer
   implicit def executionContext: ExecutionContextExecutor = system.dispatcher
 
-  protected def awaitDuration: FiniteDuration = 3.seconds.dilated
+  protected def defaultAwaitDuration = 3.seconds
+  protected def awaitDuration: FiniteDuration = defaultAwaitDuration.dilated
 
   protected def defaultHostInfo: DefaultHostInfo = DefaultHostInfo(Host.create("example.com"), false)
 
@@ -43,6 +44,11 @@ abstract class RouteTest extends AllDirectives with WSTestRequestBuilding {
 
   def runRoute(route: Route, request: HttpRequest, defaultHostInfo: DefaultHostInfo): TestRouteResult =
     runScalaRoute(route.seal().delegate, request, defaultHostInfo)
+
+  def runRouteClientServer(route: Route, request: HttpRequest): TestRouteResult = {
+    val response = scaladsl.testkit.RouteTest.runRouteClientServer(request.asScala, route.delegate, ServerSettings(system))
+    createTestRouteResultAsync(request, response.map(scalaResponse => RouteResults.complete(scalaResponse)))
+  }
 
   def runRouteUnSealed(route: Route, request: HttpRequest): TestRouteResult =
     runRouteUnSealed(route, request, defaultHostInfo)
@@ -62,7 +68,7 @@ abstract class RouteTest extends AllDirectives with WSTestRequestBuilding {
     val semiSealedRoute = // sealed for exceptions but not for rejections
       akka.http.scaladsl.server.Directives.handleExceptions(sealedExceptionHandler)(scalaRoute)
 
-    val result = semiSealedRoute(new server.RequestContextImpl(effectiveRequest, system.log, RoutingSettings(system)))
+    val result = semiSealedRoute(new server.RequestContextImpl(effectiveRequest, system.log, RoutingSettings(system), ParserSettings.forServer(system)))
     createTestRouteResultAsync(request, result)
   }
 
@@ -72,10 +78,11 @@ abstract class RouteTest extends AllDirectives with WSTestRequestBuilding {
   @varargs
   def testRoute(first: Route, others: Route*): TestRoute =
     new TestRoute {
-      val underlying: Route = Directives.route(first +: others: _*)
+      val underlying: Route = Directives.concat(first, others: _*)
 
       def run(request: HttpRequest): TestRouteResult = runRoute(underlying, request)
       def runWithRejections(request: HttpRequest): TestRouteResult = runRouteUnSealed(underlying, request)
+      def runClientServer(request: HttpRequest): TestRouteResult = runRouteClientServer(underlying, request)
     }
 
   protected def createTestRouteResult(request: HttpRequest, result: RouteResult): TestRouteResult =

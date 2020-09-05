@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.server
@@ -23,11 +23,12 @@ trait MiscDirectives {
    *
    * @group misc
    */
-  def validate(check: ⇒ Boolean, errorMsg: String): Directive0 =
-    Directive { inner ⇒ if (check) inner(()) else reject(ValidationRejection(errorMsg)) }
+  def validate(check: => Boolean, errorMsg: String): Directive0 =
+    Directive { inner => if (check) inner(()) else reject(ValidationRejection(errorMsg)) }
 
   /**
-   * Extracts the client's IP from either the X-Forwarded-For, Remote-Address or X-Real-IP header
+   * Extracts the client's IP from either the X-Forwarded-For, Remote-Address, X-Real-IP header
+   * or [[akka.http.scaladsl.model.AttributeKeys.remoteAddress]] attribute
    * (in that order of priority).
    *
    * @group misc
@@ -70,7 +71,7 @@ trait MiscDirectives {
    * @group misc
    */
   def selectPreferredLanguage(first: Language, more: Language*): Directive1[Language] =
-    BasicDirectives.extractRequest.map { request ⇒
+    BasicDirectives.extractRequest.map { request =>
       LanguageNegotiator(request.headers).pickLanguage(first :: List(more: _*)) getOrElse first
     }
 
@@ -107,10 +108,12 @@ object MiscDirectives extends MiscDirectives {
   import RouteResult._
 
   private val _extractClientIP: Directive1[RemoteAddress] =
-    headerValuePF { case `X-Forwarded-For`(Seq(address, _*)) ⇒ address } |
-      headerValuePF { case `Remote-Address`(address) ⇒ address } |
-      headerValuePF { case `X-Real-Ip`(address) ⇒ address } |
-      provide(RemoteAddress.Unknown)
+    headerValuePF { case `X-Forwarded-For`(Seq(address, _*)) => address } |
+      headerValuePF { case `X-Real-Ip`(address) => address } |
+      headerValuePF { case `Remote-Address`(address) => address } |
+      extractRequest.map { request =>
+        request.attribute(AttributeKeys.remoteAddress).getOrElse(RemoteAddress.Unknown)
+      }
 
   private val _requestEntityEmpty: Directive0 =
     extract(_.request.entity.isKnownEmpty).flatMap(if (_) pass else reject)
@@ -120,8 +123,8 @@ object MiscDirectives extends MiscDirectives {
 
   private val _rejectEmptyResponse: Directive0 =
     mapRouteResult {
-      case Complete(response) if response.entity.isKnownEmpty ⇒ Rejected(Nil)
-      case x ⇒ x
+      case Complete(response) if response.entity.isKnownEmpty => Rejected(Nil)
+      case x => x
     }
 
   private val _withoutSizeLimit: Directive0 =

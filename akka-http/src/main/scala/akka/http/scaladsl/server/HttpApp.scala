@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.server
@@ -7,7 +7,6 @@ package akka.http.scaladsl.server
 import java.util.concurrent.atomic.AtomicReference
 
 import akka.Done
-import akka.annotation.ApiMayChange
 import akka.actor.ActorSystem
 import akka.event.Logging
 import akka.http.scaladsl.Http
@@ -17,16 +16,17 @@ import akka.http.scaladsl.settings.ServerSettings
 import com.typesafe.config.ConfigFactory
 
 import scala.concurrent.duration.Duration
-import scala.concurrent.{ Await, ExecutionContext, Future, Promise, blocking }
+import scala.concurrent.{ Await, ExecutionContext, ExecutionContextExecutor, Future, Promise, blocking }
 import scala.io.StdIn
 import scala.util.{ Failure, Success, Try }
 
 /**
- * API MAY CHANGE - EXPERIMENTAL
+ * DEPRECATED, consider https://developer.lightbend.com/guides/akka-http-quickstart-scala/ instead
+ *
  * Bootstrap trait for Http Server. It helps booting up an akka-http server by only defining the desired routes.
  * It offers additional hooks to modify the default behavior.
  */
-@ApiMayChange
+@deprecated("HttpApp this doesn't reflect the latest Akka APIs", "10.2.0")
 abstract class HttpApp extends Directives {
 
   private val serverBinding = new AtomicReference[ServerBinding]()
@@ -87,30 +87,29 @@ abstract class HttpApp extends Directives {
     implicit val theSystem = system.getOrElse(ActorSystem(Logging.simpleName(this).replaceAll("\\$", "")))
     systemReference.set(theSystem)
     implicit val materializer = ActorMaterializer()
-    implicit val executionContext = theSystem.dispatcher
+    implicit val executionContext: ExecutionContextExecutor = theSystem.dispatcher
 
-    val bindingFuture = Http().bindAndHandle(
-      handler = routes,
-      interface = host,
-      port = port,
-      settings = settings)
+    val bindingFuture =
+      Http().newServerAt(host, port)
+        .withSettings(settings)
+        .bind(routes)
 
     bindingFuture.onComplete {
-      case Success(binding) ⇒
+      case Success(binding) =>
         //setting the server binding for possible future uses in the client
         serverBinding.set(binding)
         postHttpBinding(binding)
-      case Failure(cause) ⇒
+      case Failure(cause) =>
         postHttpBindingFailure(cause)
     }
 
     Await.ready(
-      bindingFuture.flatMap(_ ⇒ waitForShutdownSignal(theSystem)), // chaining both futures to fail fast
+      bindingFuture.flatMap(_ => waitForShutdownSignal(theSystem)), // chaining both futures to fail fast
       Duration.Inf) // It's waiting forever because maybe there is never a shutdown signal
 
     bindingFuture
       .flatMap(_.unbind())
-      .onComplete(attempt ⇒ {
+      .onComplete(attempt => {
         postServerShutdown(attempt, theSystem)
         // we created the system. we should cleanup!
         if (system.isEmpty) theSystem.terminate()

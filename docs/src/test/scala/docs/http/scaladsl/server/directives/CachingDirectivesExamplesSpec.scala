@@ -1,10 +1,11 @@
 /*
- * Copyright (C) 2017-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2017-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package docs.http.scaladsl.server.directives
 
-import docs.http.scaladsl.server.RoutingSpec
+import akka.http.scaladsl.server.RoutingSpec
+import docs.CompileOnlySpec
 //#caching-directives-import
 //#always-cache
 //#cache
@@ -13,9 +14,8 @@ import akka.http.scaladsl.server.directives.CachingDirectives._
 //#always-cache
 //#cache
 import akka.http.scaladsl.model.HttpMethods.GET
-import scala.concurrent.duration._
 
-class CachingDirectivesExamplesSpec extends RoutingSpec {
+class CachingDirectivesExamplesSpec extends RoutingSpec with CompileOnlySpec {
 
   "cache" in {
     //#cache
@@ -26,11 +26,13 @@ class CachingDirectivesExamplesSpec extends RoutingSpec {
 
     //Example keyer for non-authenticated GET requests
     val simpleKeyer: PartialFunction[RequestContext, Uri] = {
-      val isGet: RequestContext ⇒ Boolean = _.request.method == GET
-      val isAuthorized: RequestContext ⇒ Boolean = _.request.headers.exists(_.is(Authorization.lowercaseName))
-      PartialFunction {
-        case r: RequestContext if isGet(r) && !isAuthorized(r) ⇒ r.request.uri
+      val isGet: RequestContext => Boolean = _.request.method == GET
+      val isAuthorized: RequestContext => Boolean =
+        _.request.headers.exists(_.is(Authorization.lowercaseName))
+      val result: PartialFunction[RequestContext, Uri] = {
+        case r: RequestContext if isGet(r) && !isAuthorized(r) => r.request.uri
       }
+      result
     }
 
     // Created outside the route to allow using
@@ -70,11 +72,13 @@ class CachingDirectivesExamplesSpec extends RoutingSpec {
 
     //Example keyer for non-authenticated GET requests
     val simpleKeyer: PartialFunction[RequestContext, Uri] = {
-      val isGet: RequestContext ⇒ Boolean = _.request.method == GET
-      val isAuthorized: RequestContext ⇒ Boolean = _.request.headers.exists(_.is(Authorization.lowercaseName))
-      PartialFunction {
-        case r: RequestContext if isGet(r) && !isAuthorized(r) ⇒ r.request.uri
+      val isGet: RequestContext => Boolean = _.request.method == GET
+      val isAuthorized: RequestContext => Boolean =
+        _.request.headers.exists(_.is(Authorization.lowercaseName))
+      val result: PartialFunction[RequestContext, Uri] = {
+        case r: RequestContext if isGet(r) && !isAuthorized(r) => r.request.uri
       }
+      result
     }
 
     // Created outside the route to allow using
@@ -124,13 +128,21 @@ class CachingDirectivesExamplesSpec extends RoutingSpec {
   }
 
   "createCache" in {
+    //#keyer-function
+    import akka.http.caching.scaladsl.Cache
+    import akka.http.caching.scaladsl.CachingSettings
+    import akka.http.caching.LfuCache
     import akka.http.scaladsl.server.RequestContext
     import akka.http.scaladsl.server.RouteResult
     import akka.http.scaladsl.model.Uri
+    import akka.http.scaladsl.server.directives.CachingDirectives._
+    import scala.concurrent.duration._
 
+    // Use the request's URI as the cache's key
     val keyerFunction: PartialFunction[RequestContext, Uri] = {
-      case r: RequestContext ⇒ r.request.uri
+      case r: RequestContext => r.request.uri
     }
+    //#keyer-function
 
     var count = 0
     val innerRoute = extractUri { uri =>
@@ -139,10 +151,6 @@ class CachingDirectivesExamplesSpec extends RoutingSpec {
     }
 
     //#create-cache
-    import akka.http.caching.scaladsl.Cache
-    import akka.http.caching.scaladsl.CachingSettings
-    import akka.http.caching.LfuCache
-
     val defaultCachingSettings = CachingSettings(system)
     val lfuCacheSettings =
       defaultCachingSettings.lfuCacheSettings
@@ -150,8 +158,11 @@ class CachingDirectivesExamplesSpec extends RoutingSpec {
         .withMaxCapacity(50)
         .withTimeToLive(20.seconds)
         .withTimeToIdle(10.seconds)
-    val cachingSettings = defaultCachingSettings.withLfuCacheSettings(lfuCacheSettings)
+    val cachingSettings =
+      defaultCachingSettings.withLfuCacheSettings(lfuCacheSettings)
     val lfuCache: Cache[Uri, RouteResult] = LfuCache(cachingSettings)
+
+    // Create the route
     val route = cache(lfuCache, keyerFunction)(innerRoute)
     //#create-cache
 

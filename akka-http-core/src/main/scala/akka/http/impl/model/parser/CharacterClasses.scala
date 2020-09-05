@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.model.parser
@@ -47,11 +47,11 @@ private[http] object CharacterClasses {
   val `strict-query-value-char` = `query-fragment-char` -- "&=;"
   val `strict-query-char-np` = `strict-query-value-char` -- '+'
 
+  val `relaxed-query-char` = VCHAR -- "%#"
   val `relaxed-fragment-char` = VCHAR -- '%'
   val `relaxed-path-segment-char` = VCHAR -- "%/?#"
   val `relaxed-query-key-char` = VCHAR -- "%&=#"
   val `relaxed-query-value-char` = VCHAR -- "%&#"
-  val `raw-query-char` = VCHAR -- '#'
   val `scheme-char` = ALPHA ++ DIGIT ++ '+' ++ '-' ++ '.'
 
   val `userinfo-char` = unreserved ++ `sub-delims` ++ ':'
@@ -66,7 +66,7 @@ private[http] object CharacterClasses {
   val `cookie-separator` = CharPredicate(akka.parboiled2.EOI, ';')
   val `cookie-octet-raw` =
     CharPredicate('\u0020' to '\u007e') ++
-      CharPredicate((x: Char) ⇒ x > 0x7f && java.lang.Character.isDefined(x)) -- `cookie-separator`
+      CharPredicate((x: Char) => x > 0x7f && java.lang.Character.isDefined(x)) -- `cookie-separator`
   val `av-octet` = CharPredicate('\u0020' to '\u003a', '\u003c' to '\u007e') // http://www.rfc-editor.org/errata_search.php?rfc=6265
 
   // http://tools.ietf.org/html/rfc5988#section-5

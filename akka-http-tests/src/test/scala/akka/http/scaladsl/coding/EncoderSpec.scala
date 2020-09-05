@@ -1,19 +1,21 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.coding
 
 import akka.util.ByteString
-import org.scalatest.WordSpec
 import akka.http.scaladsl.model._
 import headers._
 import HttpMethods.POST
+
 import scala.concurrent.duration._
 import akka.http.impl.util._
 import akka.testkit._
+import com.github.ghik.silencer.silent
+import org.scalatest.wordspec.AnyWordSpec
 
-class EncoderSpec extends WordSpec with CodecSpecSupport {
+class EncoderSpec extends AnyWordSpec with CodecSpecSupport {
 
   "An Encoder" should {
     "not transform the message if messageFilter returns false" in {
@@ -31,12 +33,14 @@ class EncoderSpec extends WordSpec with CodecSpecSupport {
   def dummyCompress(s: String): String = dummyCompress(ByteString(s, "UTF8")).utf8String
   def dummyCompress(bytes: ByteString): ByteString = DummyCompressor.compressAndFinish(bytes)
 
+  @silent("is internal API")
   case object DummyEncoder extends Encoder {
     val messageFilter = Encoder.DefaultFilter
     val encoding = HttpEncodings.compress
     def newCompressor = DummyCompressor
   }
 
+  @silent("is internal API")
   case object DummyCompressor extends Compressor {
     def compress(input: ByteString) = input ++ ByteString("compressed")
     def flush() = ByteString.empty

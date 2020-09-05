@@ -1,20 +1,21 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package docs.http.scaladsl.server.directives
 
-import akka.http.scaladsl.coding._
-import docs.http.scaladsl.server.RoutingSpec
-import akka.http.scaladsl.model.{ HttpResponse, HttpEntity }
-import akka.http.scaladsl.model.headers.{ HttpEncodings, HttpEncoding, `Accept-Encoding`, `Content-Encoding` }
+import akka.http.scaladsl.coding.{ Coder, Coders, Gzip }
+import akka.http.scaladsl.model.{ HttpEntity, HttpResponse }
+import akka.http.scaladsl.model.headers.{ HttpEncoding, HttpEncodings, `Accept-Encoding`, `Content-Encoding` }
 import akka.http.scaladsl.model.headers.HttpEncodings._
 import akka.http.scaladsl.model.MediaTypes._
 import akka.http.scaladsl.server._
 import akka.util.ByteString
+import com.github.ghik.silencer.silent
+import docs.CompileOnlySpec
 import org.scalatest.matchers.Matcher
 
-class CodingDirectivesExamplesSpec extends RoutingSpec {
+class CodingDirectivesExamplesSpec extends RoutingSpec with CompileOnlySpec {
   "responseEncodingAccepted" in {
     //#responseEncodingAccepted
     val route = responseEncodingAccepted(gzip) { complete("content") }
@@ -48,7 +49,7 @@ class CodingDirectivesExamplesSpec extends RoutingSpec {
   }
   "encodeResponseWith" in {
     //#encodeResponseWith
-    val route = encodeResponseWith(Gzip) { complete("content") }
+    val route = encodeResponseWith(Coders.Gzip) { complete("content") }
 
     // tests:
     Get("/") ~> route ~> check {
@@ -63,11 +64,17 @@ class CodingDirectivesExamplesSpec extends RoutingSpec {
     Get("/") ~> `Accept-Encoding`(identity) ~> route ~> check {
       rejection shouldEqual UnacceptedResponseEncodingRejection(gzip)
     }
+
+    // with custom compression level:
+    val routeWithLevel9 = encodeResponseWith(Coders.Gzip(compressionLevel = 9)) { complete("content") }
+    Get("/") ~> routeWithLevel9 ~> check {
+      response should haveContentEncoding(gzip)
+    }
     //#encodeResponseWith
   }
 
-  val helloGzipped = compress("Hello", Gzip)
-  val helloDeflated = compress("Hello", Deflate)
+  val helloGzipped = compress("Hello", Coders.Gzip)
+  val helloDeflated = compress("Hello", Coders.Deflate)
   "decodeRequest" in {
     //#decodeRequest
     val route =
@@ -92,7 +99,7 @@ class CodingDirectivesExamplesSpec extends RoutingSpec {
   "decodeRequestWith-0" in {
     //#decodeRequestWith
     val route =
-      decodeRequestWith(Gzip) {
+      decodeRequestWith(Coders.Gzip) {
         entity(as[String]) { content: String =>
           complete(s"Request content: '$content'")
         }
@@ -113,7 +120,7 @@ class CodingDirectivesExamplesSpec extends RoutingSpec {
   "decodeRequestWith-1" in {
     //#decodeRequestWith
     val route =
-      decodeRequestWith(Gzip, NoCoding) {
+      decodeRequestWith(Coders.Gzip, Coders.NoCoding) {
         entity(as[String]) { content: String =>
           complete(s"Request content: '$content'")
         }
@@ -134,7 +141,7 @@ class CodingDirectivesExamplesSpec extends RoutingSpec {
 
   "withPrecompressedMediaTypeSupport" in {
     //#withPrecompressedMediaTypeSupport
-    val svgz = compress("<svg/>", Gzip)
+    val svgz = compress("<svg/>", Coders.Gzip)
     val route =
       withPrecompressedMediaTypeSupport {
         complete(HttpResponse(entity = HttpEntity(`image/svgz`, svgz)))
@@ -151,5 +158,6 @@ class CodingDirectivesExamplesSpec extends RoutingSpec {
   def haveContentEncoding(encoding: HttpEncoding): Matcher[HttpResponse] =
     be(encoding) compose { (_: HttpResponse).header[`Content-Encoding`].map(_.encodings.head).getOrElse(HttpEncodings.identity) }
 
-  def compress(input: String, encoder: Encoder): ByteString = encoder.encode(ByteString(input))
+  @silent("encode in trait Encoder is deprecated")
+  def compress(input: String, encoder: Coder): ByteString = encoder.encode(ByteString(input))
 }

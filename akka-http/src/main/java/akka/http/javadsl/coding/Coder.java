@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.javadsl.coding;
@@ -8,11 +8,9 @@ import java.util.concurrent.CompletionStage;
 
 import akka.http.javadsl.model.HttpRequest;
 import akka.http.javadsl.model.HttpResponse;
-import akka.http.javadsl.model.headers.ContentEncoding;
 import akka.http.scaladsl.coding.Deflate$;
 import akka.http.scaladsl.coding.Gzip$;
 import akka.http.scaladsl.coding.NoCoding$;
-import akka.http.scaladsl.model.HttpMessage;
 import akka.stream.Materializer;
 import akka.util.ByteString;
 import scala.compat.java8.FutureConverters;
@@ -21,7 +19,11 @@ import scala.compat.java8.FutureConverters;
  * A coder is an implementation of the predefined encoders/decoders defined for HTTP.
  */
 public enum Coder {
-    NoCoding(NoCoding$.MODULE$), Deflate(Deflate$.MODULE$), Gzip(Gzip$.MODULE$);
+    NoCoding(NoCoding$.MODULE$), Deflate(Deflate$.MODULE$), Gzip(Gzip$.MODULE$),
+    DeflateLevel1(Deflate$.MODULE$.withLevel(1)),
+    DeflateLevel9(Deflate$.MODULE$.withLevel(9)),
+    GzipLevel1(Gzip$.MODULE$.withLevel(1)),
+    GzipLevel9(Gzip$.MODULE$.withLevel(9));
 
     private akka.http.scaladsl.coding.Coder underlying;
 
@@ -37,6 +39,10 @@ public enum Coder {
         return (HttpRequest) underlying.encodeMessage((akka.http.scaladsl.model.HttpMessage) message);
     }
 
+    /**
+     * @deprecated Synchronous encoding is deprecated since 10.2.0
+     */
+    @Deprecated
     public ByteString encode(ByteString input) {
         return underlying.encode(input);
     }

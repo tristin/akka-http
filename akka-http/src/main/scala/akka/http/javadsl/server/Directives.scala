@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.javadsl.server
@@ -8,6 +8,7 @@ import java.util.function.{ BiFunction, Function, Supplier }
 
 import akka.annotation.ApiMayChange
 import akka.http.javadsl.server.directives.FramedEntityStreamingDirectives
+import com.github.ghik.silencer.silent
 
 import scala.annotation.varargs
 
@@ -23,7 +24,10 @@ object Directives extends AllDirectives {
   // These are repeated here since sometimes (?) the Scala compiler won't actually generate java-compatible
   // signatures for varargs methods, making them show up as Seq<Object> instead of T... in Java.
 
-  @varargs override def route(alternatives: Route*): Route =
+  @Deprecated
+  @varargs
+  @silent("route in class RouteDirectives is deprecated")
+  override def route(alternatives: Route*): Route =
     super.route(alternatives: _*)
 
   @varargs override def getFromBrowseableDirectories(directories: String*): Route =

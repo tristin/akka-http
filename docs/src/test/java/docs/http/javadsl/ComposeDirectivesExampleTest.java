@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package docs.http.javadsl;
@@ -33,14 +33,11 @@ public class ComposeDirectivesExampleTest extends AllDirectives {
     ActorSystem system = ActorSystem.create("routes");
 
     final Http http = Http.get(system);
-    final ActorMaterializer materializer = ActorMaterializer.create(system);
 
     //In order to access all directives we need an instance where the routes are define.
     ComposeDirectivesExampleTest app = new ComposeDirectivesExampleTest();
 
-    final Flow<HttpRequest, HttpResponse, NotUsed> routeFlow = app.createRoute().flow(system, materializer);
-    final CompletionStage<ServerBinding> binding = http.bindAndHandle(routeFlow,
-        ConnectHttp.toHost("localhost", 8080), materializer);
+    final CompletionStage<ServerBinding> binding = http.newServerAt("localhost", 8080).bind(app.createRoute());
 
     System.out.println("Server online at http://localhost:8080/\nPress RETURN to stop...");
     System.in.read(); // let it run until user presses return
@@ -53,7 +50,7 @@ public class ComposeDirectivesExampleTest extends AllDirectives {
   private Route createRoute() {
     BiFunction<PathMatcher1<Integer>, Function<Integer,Route>, Route> pathWithInteger = this::path;
 
-    return route(
+    return concat(
       //anyOf examples
       path("hello", () ->
         anyOf(this::get, this::put, () ->

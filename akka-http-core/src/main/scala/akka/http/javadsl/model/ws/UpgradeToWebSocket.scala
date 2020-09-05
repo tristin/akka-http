@@ -1,11 +1,11 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.javadsl.model.ws
 
-import java.lang.{ Iterable ⇒ JIterable }
-import akka.http.scaladsl.{ model ⇒ sm }
+import java.lang.{ Iterable => JIterable }
+import akka.http.scaladsl.{ model => sm }
 import akka.http.javadsl.model._
 
 import akka.stream._
@@ -13,8 +13,17 @@ import akka.stream._
 /**
  * A virtual header that WebSocket requests will contain. Use [[UpgradeToWebSocket.handleMessagesWith]] to
  * create a WebSocket handshake response and handle the WebSocket message stream with the given handler.
+ *
+ * This low-level API is expected to be replaced by an Attribute in the future.
+ *
+ * In any case, you might want to use `handleWebSocketMessages` instead as documented
+ * at https://doc.akka.io/docs/akka-http/current/server-side/websocket-support.html#routing-support
+ *
+ * @deprecated use the WebSocketUpgrade attribute instead since 10.2.0
  */
-trait UpgradeToWebSocket extends sm.HttpHeader {
+@Deprecated
+@deprecated("use the WebSocketUpgrade attribute instead", since = "10.2.0")
+trait UpgradeToWebSocket extends sm.HttpHeader with WebSocketUpgrade {
   /**
    * Returns the sequence of protocols the client accepts.
    *

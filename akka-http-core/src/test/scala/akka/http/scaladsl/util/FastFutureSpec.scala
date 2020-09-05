@@ -1,39 +1,41 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.util
 
-import scala.util.control.NoStackTrace
-import scala.concurrent.{ Await, Promise, Future }
-import scala.concurrent.duration._
-import scala.concurrent.ExecutionContext.Implicits.global
-import org.scalatest.{ FreeSpec, Matchers }
-import scala.util.{ Try, Failure, Success }
 import akka.http.scaladsl.util.FastFuture._
 
-class FastFutureSpec extends FreeSpec with Matchers {
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.duration._
+import scala.concurrent.{ Await, Future, Promise }
+import scala.util.control.NoStackTrace
+import scala.util.{ Failure, Success, Try }
+import org.scalatest.freespec.AnyFreeSpec
+import org.scalatest.matchers.should.Matchers
+
+class FastFutureSpec extends AnyFreeSpec with Matchers {
   object TheException extends RuntimeException("Expected exception") with NoStackTrace
 
   "FastFuture should implement" - {
     "transformWith(Try => Future)" - {
       "Success -> Success" in {
-        test(Success(23), _.transformWith(t ⇒ FastFuture(t.map(_ + 19)))) {
+        test(Success(23), _.transformWith(t => FastFuture(t.map(_ + 19)))) {
           _ shouldEqual Success(42)
         }
       }
       "Success -> Failure" in {
-        test(Success(23), _.transformWith(_ ⇒ FastFuture.failed(TheException))) {
+        test(Success(23), _.transformWith(_ => FastFuture.failed(TheException))) {
           _ shouldEqual Failure(TheException)
         }
       }
       "Failure -> Success" in {
-        test(Failure(TheException), _.transformWith(t ⇒ FastFuture.successful(23))) {
+        test(Failure(TheException), _.transformWith(t => FastFuture.successful(23))) {
           _ shouldEqual Success(23)
         }
       }
       "Failure -> Failure" in {
-        test(Failure(TheException), _.transformWith(_ ⇒ FastFuture.failed(TheException))) {
+        test(Failure(TheException), _.transformWith(_ => FastFuture.failed(TheException))) {
           _ shouldEqual Failure(TheException)
         }
       }
@@ -50,22 +52,22 @@ class FastFutureSpec extends FreeSpec with Matchers {
     }
     "transformWith(A => Future[B], Throwable => Future[B])" - {
       "Success -> Success" in {
-        test(Success(23), _.transformWith(t ⇒ FastFuture.successful(t + 19), neverCalled)) {
+        test(Success(23), _.transformWith(t => FastFuture.successful(t + 19), neverCalled)) {
           _ shouldEqual Success(42)
         }
       }
       "Success -> Failure" in {
-        test(Success(23), _.transformWith(_ ⇒ FastFuture.failed(TheException), neverCalled)) {
+        test(Success(23), _.transformWith(_ => FastFuture.failed(TheException), neverCalled)) {
           _ shouldEqual Failure(TheException)
         }
       }
       "Failure -> Success" in {
-        test(Failure(TheException), _.transformWith(neverCalled, t ⇒ FastFuture.successful(23))) {
+        test(Failure(TheException), _.transformWith(neverCalled, t => FastFuture.successful(23))) {
           _ shouldEqual Success(23)
         }
       }
       "Failure -> Failure" in {
-        test(Failure(TheException), _.transformWith(neverCalled, _ ⇒ FastFuture.failed(TheException))) {
+        test(Failure(TheException), _.transformWith(neverCalled, _ => FastFuture.failed(TheException))) {
           _ shouldEqual Failure(TheException)
         }
       }
@@ -99,7 +101,7 @@ class FastFutureSpec extends FreeSpec with Matchers {
     }
     "flatMap" - {
       "both success" in {
-        test(Success(23), _.flatMap(i ⇒ FastFuture.successful(i + 19))) {
+        test(Success(23), _.flatMap(i => FastFuture.successful(i + 19))) {
           _ shouldEqual Success(42)
         }
       }
@@ -109,7 +111,7 @@ class FastFutureSpec extends FreeSpec with Matchers {
         }
       }
       "inner failure" in {
-        test(Success(23), _.flatMap(i ⇒ FastFuture.failed(TheException))) {
+        test(Success(23), _.flatMap(i => FastFuture.failed(TheException))) {
           _ shouldEqual Failure(TheException)
         }
       }
@@ -126,12 +128,12 @@ class FastFutureSpec extends FreeSpec with Matchers {
         }
       }
       "Failure -> Success" in {
-        test(Failure(UnexpectedException), _.recoverWith { case _ ⇒ FastFuture.successful(23) }) {
+        test(Failure(UnexpectedException), _.recoverWith { case _ => FastFuture.successful(23) }) {
           _ shouldEqual Success(23)
         }
       }
       "Failure -> Failure" in {
-        test(Failure(UnexpectedException), _.recoverWith { case _ ⇒ FastFuture.failed(TheException) }) {
+        test(Failure(UnexpectedException), _.recoverWith { case _ => FastFuture.failed(TheException) }) {
           _ shouldEqual Failure(TheException)
         }
       }
@@ -148,7 +150,7 @@ class FastFutureSpec extends FreeSpec with Matchers {
         }
       }
       "Failure -> Success" in {
-        test(Failure(UnexpectedException), _.recover { case _ ⇒ 23 }) {
+        test(Failure(UnexpectedException), _.recover { case _ => 23 }) {
           _ shouldEqual Success(23)
         }
       }
@@ -160,13 +162,13 @@ class FastFutureSpec extends FreeSpec with Matchers {
     }
   }
 
-  def test(result: Try[Int], op: FastFuture[Int] ⇒ Future[Int])(check: Try[Int] ⇒ Unit): Unit = {
+  def test(result: Try[Int], op: FastFuture[Int] => Future[Int])(check: Try[Int] => Unit): Unit = {
     def testStrictly(): Unit = {
       val f = FastFuture(result)
       check(op(f.fast).value.get)
     }
     def testLazily(): Unit = {
-      val p = Promise[Int]
+      val p = Promise[Int]()
       val opped = op(p.future.fast)
       p.complete(result)
       Await.ready(opped, 500.millis)
@@ -176,8 +178,12 @@ class FastFutureSpec extends FreeSpec with Matchers {
     testLazily()
   }
 
-  def failF: PartialFunction[Any, Nothing] = PartialFunction(_ ⇒ throw TheException)
+  def failF: PartialFunction[Any, Nothing] = {
+    case _ => throw TheException
+  }
   class UnexpectedException extends RuntimeException("Unexpected exception - should never happen")
   object UnexpectedException extends UnexpectedException with NoStackTrace
-  def neverCalled: PartialFunction[Any, Nothing] = PartialFunction(_ ⇒ throw new UnexpectedException)
+  def neverCalled: PartialFunction[Any, Nothing] = {
+    case _ => throw new UnexpectedException
+  }
 }

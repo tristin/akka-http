@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package docs.http.javadsl;
@@ -11,15 +11,11 @@ import akka.http.javadsl.coding.Coder;
 import akka.http.javadsl.model.HttpRequest;
 import akka.http.javadsl.model.HttpResponse;
 import akka.http.scaladsl.model.headers.HttpEncodings;
-import akka.stream.ActorMaterializer;
-import akka.stream.Materializer;
-import scala.concurrent.duration.FiniteDuration;
 
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -28,7 +24,6 @@ public class HttpClientDecodingExampleTest {
   public static void main(String[] args) throws Exception {
 
     final ActorSystem system = ActorSystem.create();
-    final Materializer materializer = ActorMaterializer.create(system);
 
     final List<HttpRequest> httpRequests = Arrays.asList(
       HttpRequest.create("https://httpbin.org/gzip"), // Content-Encoding: gzip in response
@@ -54,7 +49,7 @@ public class HttpClientDecodingExampleTest {
     };
 
     List<CompletableFuture<HttpResponse>> futureResponses = httpRequests.stream()
-      .map(req -> http.singleRequest(req, materializer)
+      .map(req -> http.singleRequest(req)
         .thenApply(decodeResponse))
       .map(CompletionStage::toCompletableFuture)
       .collect(Collectors.toList());
@@ -62,7 +57,7 @@ public class HttpClientDecodingExampleTest {
     for (CompletableFuture<HttpResponse> futureResponse : futureResponses) {
       final HttpResponse httpResponse = futureResponse.get();
       system.log().info("response is: " + httpResponse.entity()
-                        .toStrict(1000, materializer)
+                        .toStrict(1000, system)
                         .toCompletableFuture()
                         .get());
     }

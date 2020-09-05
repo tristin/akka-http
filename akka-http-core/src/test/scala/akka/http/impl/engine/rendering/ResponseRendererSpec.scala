@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.engine.rendering
@@ -8,7 +8,7 @@ import com.typesafe.config.{ Config, ConfigFactory }
 
 import scala.concurrent.duration._
 import scala.concurrent.Await
-import org.scalatest.{ BeforeAndAfterAll, FreeSpec, Matchers }
+import org.scalatest.BeforeAndAfterAll
 import org.scalatest.matchers.Matcher
 import akka.actor.ActorSystem
 import akka.event.NoLogging
@@ -19,9 +19,12 @@ import akka.util.ByteString
 import akka.stream.scaladsl._
 import akka.stream.ActorMaterializer
 import HttpEntity._
+import akka.http.impl.engine.rendering.ResponseRenderingContext.CloseRequested
 import akka.testkit._
+import org.scalatest.freespec.AnyFreeSpec
+import org.scalatest.matchers.should.Matchers
 
-class ResponseRendererSpec extends FreeSpec with Matchers with BeforeAndAfterAll {
+class ResponseRendererSpec extends AnyFreeSpec with Matchers with BeforeAndAfterAll {
   val testConf: Config = ConfigFactory.parseString("""
     akka.event-handlers = ["akka.testkit.TestEventListener"]
     akka.loglevel = WARNING""")
@@ -78,7 +81,7 @@ class ResponseRendererSpec extends FreeSpec with Matchers with BeforeAndAfterAll
       "a custom status code and no headers and different dates" in new TestSetup() {
         val initial = DateTime(2011, 8, 25, 9, 10, 0).clicks
         var extraMillis = 0L
-        (0 until 10000 by 500) foreach { millis ⇒
+        (0 until 10000 by 500) foreach { millis =>
           extraMillis = millis
           HttpResponse(200) should renderTo {
             s"""HTTP/1.1 200 OK
@@ -572,7 +575,11 @@ class ResponseRendererSpec extends FreeSpec with Matchers with BeforeAndAfterAll
       //#connection-header-table
       // format: ON
 
-      forAll(table)((reqProto, headReq, reqCH, resProto, resCH, resCD, renCH, close) ⇒
+      def closing(requested: Boolean): CloseRequested =
+        if (requested) CloseRequested.RequestAskedForClosing
+        else CloseRequested.Unspecified
+
+      forAll(table)((reqProto, headReq, reqCH, resProto, resCH, resCD, renCH, close) =>
         ResponseRenderingContext(
           response = HttpResponse(200, headers = resCH.toList,
             entity = if (resCD) HttpEntity.CloseDelimited(
@@ -581,11 +588,11 @@ class ResponseRendererSpec extends FreeSpec with Matchers with BeforeAndAfterAll
             else HttpEntity("ENTITY"), protocol = resProto),
           requestMethod = if (headReq) HttpMethods.HEAD else HttpMethods.GET,
           requestProtocol = reqProto,
-          closeRequested = HttpMessage.connectionCloseExpected(reqProto, reqCH)) should renderTo(
+          closeRequested = closing(HttpMessage.connectionCloseExpected(reqProto, reqCH))) should renderTo(
             s"""${resProto.value} 200 OK
                  |Server: akka-http/1.0.0
                  |Date: Thu, 25 Aug 2011 09:10:29 GMT
-                 |${renCH.fold("")(_ + "\n")}Content-Type: text/plain; charset=UTF-8
+                 |${renCH.fold("")(_.toString + "\n")}Content-Type: text/plain; charset=UTF-8
                  |${if (resCD) "" else "Content-Length: 6\n"}
                  |${if (headReq) "" else "ENTITY"}""", close))
     }
@@ -605,20 +612,20 @@ class ResponseRendererSpec extends FreeSpec with Matchers with BeforeAndAfterAll
       renderToImpl(expected, checkClose = Some(close))
 
     def renderToImpl(expected: String, checkClose: Option[Boolean]): Matcher[ResponseRenderingContext] =
-      equal(expected.stripMarginWithNewline("\r\n") → checkClose).matcher[(String, Option[Boolean])] compose { ctx ⇒
+      equal(expected.stripMarginWithNewline("\r\n") -> checkClose).matcher[(String, Option[Boolean])] compose { ctx =>
         val resultFuture =
           // depends on renderer being completed fused and synchronous and finished in less steps than the configured event horizon
           CollectorStage.resultAfterSourceElements(
             Source.single(ctx),
             renderer.named("renderer")
               .map {
-                case ResponseRenderingOutput.HttpData(bytes)      ⇒ bytes
-                case _: ResponseRenderingOutput.SwitchToWebSocket ⇒ throw new IllegalStateException("Didn't expect websocket response")
+                case ResponseRenderingOutput.HttpData(bytes)          => bytes
+                case _: ResponseRenderingOutput.SwitchToOtherProtocol => throw new IllegalStateException("Didn't expect protocol switch response")
               }
           )
 
         Await.result(resultFuture, awaitAtMost) match {
-          case (result, completed) ⇒ result.reduceLeft(_ ++ _).utf8String → checkClose.map(_ ⇒ completed)
+          case (result, completed) => result.reduceLeft(_ ++ _).utf8String -> checkClose.map(_ => completed)
         }
       }
 

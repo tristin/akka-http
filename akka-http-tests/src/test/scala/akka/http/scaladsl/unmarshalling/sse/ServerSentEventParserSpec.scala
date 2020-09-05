@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http
@@ -9,7 +9,8 @@ package sse
 
 import akka.http.scaladsl.model.sse.ServerSentEvent
 import akka.stream.scaladsl.{ Sink, Source }
-import org.scalatest.{ AsyncWordSpec, Matchers }
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AsyncWordSpec
 
 final class ServerSentEventParserSpec extends AsyncWordSpec with Matchers with BaseUnmarshallingSpec {
 
@@ -33,10 +34,10 @@ final class ServerSentEventParserSpec extends AsyncWordSpec with Matchers with B
                      |:no data means event gets ignored
                      |
                      |data
-                     |:emtpy data means event gets ignored
+                     |:empty data means event gets ignored
                      |
                      |data:
-                     |:emtpy data means event gets ignored
+                     |:empty data means event gets ignored
                      |
                      |data: event 3
                      |id

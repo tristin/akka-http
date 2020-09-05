@@ -1,27 +1,25 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package docs.http.scaladsl.server.directives
 
-import java.nio.file.Paths
-
 import akka.actor.ActorSystem
 import akka.event.Logging
 import akka.http.scaladsl.model._
-import akka.http.scaladsl.model.headers.{ Server, RawHeader }
+import akka.http.scaladsl.model.headers.{ RawHeader, Server }
 import akka.http.scaladsl.server.RouteResult.{ Complete, Rejected }
 import akka.http.scaladsl.server._
 import akka.http.scaladsl.settings.RoutingSettings
-import akka.stream.ActorMaterializer
-import akka.stream.scaladsl.{ FileIO, Sink, Source }
+import akka.stream.{ Materializer, SystemMaterializer }
+import akka.stream.scaladsl.{ Sink, Source }
 import akka.util.ByteString
-import docs.http.scaladsl.server.RoutingSpec
+import docs.CompileOnlySpec
 
 import scala.concurrent.Future
 import scala.util.control.NonFatal
 
-class BasicDirectivesExamplesSpec extends RoutingSpec {
+class BasicDirectivesExamplesSpec extends RoutingSpec with CompileOnlySpec {
   "0extract" in {
     //#extract0
     val uriLength = extract(_.request.uri.toString.length)
@@ -52,7 +50,7 @@ class BasicDirectivesExamplesSpec extends RoutingSpec {
   }
   "withMaterializer-0" in {
     //#withMaterializer-0
-    val special = ActorMaterializer(namePrefix = Some("special"))
+    val special = Materializer(system).withNamePrefix("special")
 
     def sample() =
       path("sample") {
@@ -74,7 +72,7 @@ class BasicDirectivesExamplesSpec extends RoutingSpec {
 
     // tests:
     Get("/sample") ~> route ~> check {
-      responseAs[String] shouldEqual s"Materialized by ${materializer.##}!"
+      responseAs[String] shouldEqual s"Materialized by ${SystemMaterializer(system).materializer.##}!"
     }
     Get("/special/sample") ~> route ~> check {
       responseAs[String] shouldEqual s"Materialized by ${special.##}!"
@@ -88,7 +86,7 @@ class BasicDirectivesExamplesSpec extends RoutingSpec {
         extractMaterializer { materializer =>
           complete {
             // explicitly use the `materializer`:
-            Source.single(s"Materialized by ${materializer.##}!")
+            Source.single(s"Materialized by ${SystemMaterializer(system).materializer.##}!")
               .runWith(Sink.head)(materializer)
           }
         }
@@ -96,7 +94,7 @@ class BasicDirectivesExamplesSpec extends RoutingSpec {
 
     // tests:
     Get("/sample") ~> route ~> check {
-      responseAs[String] shouldEqual s"Materialized by ${materializer.##}!"
+      responseAs[String] shouldEqual s"Materialized by ${SystemMaterializer(system).materializer.##}!"
     }
     //#extractMaterializer-0
   }
@@ -184,24 +182,21 @@ class BasicDirectivesExamplesSpec extends RoutingSpec {
   }
   "withSettings-0" in compileOnlySpec {
     //#withSettings-0
-    val special = RoutingSettings(system).withFileIODispatcher("special-io-dispatcher")
+    val special = RoutingSettings(system).withFileGetConditional(false)
 
     def sample() =
       path("sample") {
-        complete {
-          // internally uses the configured fileIODispatcher:
-          val source = FileIO.fromPath(Paths.get("example.json"))
-          HttpResponse(entity = HttpEntity(ContentTypes.`application/json`, source))
-        }
+        // internally uses fileGetConditional setting
+        getFromFile("example.json")
       }
 
     val route =
       get {
         pathPrefix("special") {
           withSettings(special) {
-            sample() // `special` file-io-dispatcher will be used to read the file
+            sample() // ETag/`If-Modified-Since` disabled
           }
-        } ~ sample() // default file-io-dispatcher will be used to read the file
+        } ~ sample() // ETag/`If-Modified-Since` enabled
       }
 
     // tests:
@@ -247,7 +242,7 @@ class BasicDirectivesExamplesSpec extends RoutingSpec {
   "0mapResponse" in {
     //#mapResponse0
     def overwriteResultStatus(response: HttpResponse): HttpResponse =
-      response.copy(status = StatusCodes.BadGateway)
+      response.withStatus(StatusCodes.BadGateway)
     val route = mapResponse(overwriteResultStatus)(complete("abc"))
 
     // tests:
@@ -270,7 +265,7 @@ class BasicDirectivesExamplesSpec extends RoutingSpec {
           case code if code.isSuccess => response
           case code =>
             log.warning("Dropping response entity since response status code was: {}", code)
-            response.copy(entity = NullJsonEntity)
+            response.withEntity(NullJsonEntity)
         }
 
       /** Wrapper for all of our JSON API routes */
@@ -306,7 +301,7 @@ class BasicDirectivesExamplesSpec extends RoutingSpec {
     val makeEverythingOk = mapRouteResult {
       case Complete(response) =>
         // "Everything is OK!"
-        Complete(response.copy(status = 200))
+        Complete(response.withStatus(200))
       case r => r
     }
 
@@ -440,16 +435,18 @@ class BasicDirectivesExamplesSpec extends RoutingSpec {
     val route =
       authRejectionsToNothingToSeeHere {
         pathPrefix("auth") {
-          path("never") {
-            authenticateBasic("my-realm", neverAuth) { user =>
-              complete("Welcome to the bat-cave!")
-            }
-          } ~
+          concat(
+            path("never") {
+              authenticateBasic("my-realm", neverAuth) { user =>
+                complete("Welcome to the bat-cave!")
+              }
+            },
             path("always") {
               authenticateBasic("my-realm", alwaysAuth) { user =>
                 complete("Welcome to the secret place!")
               }
             }
+          )
         }
       }
 
@@ -501,7 +498,7 @@ class BasicDirectivesExamplesSpec extends RoutingSpec {
   }
   "0mapRequest" in {
     //#mapRequest0
-    def transformToPostRequest(req: HttpRequest): HttpRequest = req.copy(method = HttpMethods.POST)
+    def transformToPostRequest(req: HttpRequest): HttpRequest = req.withMethod(HttpMethods.POST)
     val route =
       mapRequest(transformToPostRequest) {
         extractRequest { req =>
@@ -844,15 +841,15 @@ class BasicDirectivesExamplesSpec extends RoutingSpec {
   "extractDataBytes-example" in {
     //#extractDataBytes-example
     val route =
-      extractDataBytes { data ⇒
-        val sum = data.runFold(0) { (acc, i) ⇒ acc + i.utf8String.toInt }
-        onSuccess(sum) { s ⇒
+      extractDataBytes { data =>
+        val sum = data.runFold(0) { (acc, i) => acc + i.utf8String.toInt }
+        onSuccess(sum) { s =>
           complete(HttpResponse(entity = HttpEntity(s.toString)))
         }
       }
 
     // tests:
-    val dataBytes = Source.fromIterator(() ⇒ Iterator.range(1, 10).map(x ⇒ ByteString(x.toString)))
+    val dataBytes = Source.fromIterator(() => Iterator.range(1, 10).map(x => ByteString(x.toString)))
     Post("/abc", HttpEntity(ContentTypes.`text/plain(UTF-8)`, data = dataBytes)) ~> route ~> check {
       responseAs[String] shouldEqual "45"
     }
@@ -866,7 +863,7 @@ class BasicDirectivesExamplesSpec extends RoutingSpec {
     }
 
     // tests:
-    val dataBytes = Source.fromIterator(() ⇒ Iterator.range(1, 10).map(x ⇒ ByteString(x.toString)))
+    val dataBytes = Source.fromIterator(() => Iterator.range(1, 10).map(x => ByteString(x.toString)))
     Post("/", HttpEntity(ContentTypes.`text/plain(UTF-8)`, data = dataBytes)) ~> route ~> check {
       responseAs[String] shouldEqual "123456789"
     }
@@ -887,7 +884,7 @@ class BasicDirectivesExamplesSpec extends RoutingSpec {
     }
 
     // tests:
-    val dataBytes = Source.fromIterator(() ⇒ Iterator.range(1, 10).map(x ⇒ ByteString(x.toString)))
+    val dataBytes = Source.fromIterator(() => Iterator.range(1, 10).map(x => ByteString(x.toString)))
     Post("/", HttpEntity(ContentTypes.`text/plain(UTF-8)`, data = dataBytes)) ~> route ~> check {
       responseAs[String] shouldEqual "Request entity is strict, data=123456789"
     }

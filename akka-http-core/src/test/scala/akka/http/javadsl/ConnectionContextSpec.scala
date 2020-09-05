@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.javadsl
@@ -8,9 +8,10 @@ import java.util.{ Collections, Optional }
 import javax.net.ssl.SSLContext
 
 import akka.stream.TLSClientAuth
-import org.scalatest.{ Matchers, WordSpec }
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
 
-class ConnectionContextSpec extends WordSpec with Matchers {
+class ConnectionContextSpec extends AnyWordSpec with Matchers {
 
   "ConnectionContext.https" should {
 

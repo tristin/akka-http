@@ -1,10 +1,9 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package docs.http.scaladsl
 
-import akka.stream.{ Materializer, ActorMaterializer }
 import akka.testkit.AkkaSpec
 
 class UnmarshalSpec extends AkkaSpec {
@@ -13,7 +12,6 @@ class UnmarshalSpec extends AkkaSpec {
     //#use-unmarshal
     import akka.http.scaladsl.unmarshalling.Unmarshal
     import system.dispatcher // Optional ExecutionContext (default from Materializer)
-    implicit val materializer: Materializer = ActorMaterializer()
 
     import scala.concurrent.Await
     import scala.concurrent.duration._
@@ -30,7 +28,6 @@ class UnmarshalSpec extends AkkaSpec {
 
   "use unmarshal without execution context" in {
     import akka.http.scaladsl.unmarshalling.Unmarshal
-    implicit val materializer: Materializer = ActorMaterializer()
 
     import scala.concurrent.Await
     import scala.concurrent.duration._

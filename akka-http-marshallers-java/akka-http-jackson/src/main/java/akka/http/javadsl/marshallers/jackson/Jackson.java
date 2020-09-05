@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.javadsl.marshallers.jackson;
@@ -12,6 +12,9 @@ import akka.http.javadsl.model.RequestEntity;
 import akka.http.javadsl.marshalling.Marshaller;
 import akka.http.javadsl.unmarshalling.Unmarshaller;
 
+import akka.http.scaladsl.model.ExceptionWithErrorInfo;
+import akka.http.scaladsl.model.ErrorInfo;
+
 import akka.util.ByteString;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.MapperFeature;
@@ -20,6 +23,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 public class Jackson {
   private static final ObjectMapper defaultObjectMapper =
     new ObjectMapper().enable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY);
+
+  /**
+   * INTERNAL API
+   */
+  public static class JacksonUnmarshallingException extends ExceptionWithErrorInfo {
+    public JacksonUnmarshallingException(Class<?> expectedType, IOException cause) {
+      super(new ErrorInfo("Cannot unmarshal JSON as " + expectedType.getSimpleName(), cause.getMessage()), cause);
+    }
+  }
 
   public static <T> Marshaller<T, RequestEntity> marshaller() {
     return marshaller(defaultObjectMapper);
@@ -62,7 +74,7 @@ public class Jackson {
     try {
       return mapper.readerFor(expectedType).readValue(json);
     } catch (IOException e) {
-      throw new IllegalArgumentException("Cannot unmarshal JSON as " + expectedType.getSimpleName(), e);
+      throw new JacksonUnmarshallingException(expectedType, e);
     }
   }
 }

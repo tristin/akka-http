@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.model
@@ -7,7 +7,7 @@ package akka.http.scaladsl.model
 import language.implicitConversions
 import akka.annotation.ApiMayChange
 import akka.http.impl.util._
-import akka.http.javadsl.{ model ⇒ jm }
+import akka.http.javadsl.{ model => jm }
 
 /** The result status code of an HTTP response. */
 sealed abstract class StatusCode extends jm.StatusCode with LazyValueBytesRenderable {
@@ -113,7 +113,7 @@ object StatusCodes extends ObjectRegistry[Int, StatusCode] {
   val Accepted                    = reg(s(202)("Accepted", "The request has been accepted for processing, but the processing has not been completed."))
   val NonAuthoritativeInformation = reg(s(203)("Non-Authoritative Information", "The server successfully processed the request, but is returning information that may be from another source."))
   val NoContent                   = reg(s(204)("No Content", "The server successfully processed the request and is not returning any content.", allowsEntity = false))
-  val ResetContent                = reg(s(205)("Reset Content", "The server successfully processed the request, but is not returning any content."))
+  val ResetContent                = reg(s(205)("Reset Content", "The server successfully processed the request, but is not returning any content.", allowsEntity = false))
   val PartialContent              = reg(s(206)("Partial Content", "The server is delivering only part of the resource due to a range header sent by the client."))
   val MultiStatus                 = reg(s(207)("Multi-Status", "The message body that follows is an XML message and can contain a number of separate response codes, depending on how many sub-requests were made."))
   val AlreadyReported             = reg(s(208)("Already Reported", "The members of a DAV binding have already been enumerated in a previous reply to this request, and are not being included again."))
@@ -141,10 +141,16 @@ object StatusCodes extends ObjectRegistry[Int, StatusCode] {
   val Gone                         = reg(c(410)("Gone", "The resource requested is no longer available and will not be available again."))
   val LengthRequired               = reg(c(411)("Length Required", "The request did not specify the length of its content, which is required by the requested resource."))
   val PreconditionFailed           = reg(c(412)("Precondition Failed", "The server does not meet one of the preconditions that the requester put on the request."))
-  val RequestEntityTooLarge        = reg(c(413)("Request Entity Too Large", "The request is larger than the server is willing or able to process."))
-  val RequestUriTooLong            = reg(c(414)("Request-URI Too Long", "The URI provided was too long for the server to process."))
+  val PayloadTooLarge              = reg(c(413)("Payload Too Large", "The request payload is larger than the server is willing or able to process."))
+  @deprecated("deprecated in favor of PayloadTooLarge", "10.1.11")
+  val RequestEntityTooLarge        = PayloadTooLarge
+  val UriTooLong                   = reg(c(414)("URI Too Long", "The URI provided was too long for the server to process."))
+  @deprecated("deprecated in favor of UriTooLong", "10.1.11")
+  val RequestUriTooLong            = UriTooLong
   val UnsupportedMediaType         = reg(c(415)("Unsupported Media Type", "The request entity has a media type which the server or resource does not support."))
-  val RequestedRangeNotSatisfiable = reg(c(416)("Requested Range Not Satisfiable", "The client has asked for a portion of the file, but the server cannot supply that portion."))
+  val RangeNotSatisfiable          = reg(c(416)("Range Not Satisfiable", "The client has asked for a portion of the file, but the server cannot supply that portion."))
+  @deprecated("deprecated in favor of RangeNotSatisfiable", "10.1.11")
+  val RequestedRangeNotSatisfiable = RangeNotSatisfiable
   val ExpectationFailed            = reg(c(417)("Expectation Failed", "The server cannot meet the requirements of the Expect request-header field."))
   val ImATeapot                    = reg(c(418)("I'm a teapot", "The resulting entity body MAY be short and stout."))
   val EnhanceYourCalm              = reg(c(420)("Enhance Your Calm", "You are being rate-limited.")) // Twitter only
@@ -152,7 +158,9 @@ object StatusCodes extends ObjectRegistry[Int, StatusCode] {
   val UnprocessableEntity          = reg(c(422)("Unprocessable Entity", "The request was well-formed but was unable to be followed due to semantic errors."))
   val Locked                       = reg(c(423)("Locked", "The resource that is being accessed is locked."))
   val FailedDependency             = reg(c(424)("Failed Dependency", "The request failed due to failure of a previous request."))
-  val UnorderedCollection          = reg(c(425)("Unordered Collection", "The collection is unordered."))
+  val TooEarly                     = reg(c(425)("Too Early", "The server is unwilling to risk processing a request that might be replayed.")) // RFC 8470
+  @deprecated("Non-standard Unordered Collection should not be used, deprecated in favor of TooEarly", "10.1.6")
+  val UnorderedCollection          = TooEarly
   val UpgradeRequired              = reg(c(426)("Upgrade Required", "The client should switch to a different protocol."))
   val PreconditionRequired         = reg(c(428)("Precondition Required", "The server requires the request to be conditional."))
   val TooManyRequests              = reg(c(429)("Too Many Requests", "The user has sent too many requests in a given amount of time."))
@@ -166,7 +174,9 @@ object StatusCodes extends ObjectRegistry[Int, StatusCode] {
   val BadGateway                    = reg(e(502)("Bad Gateway", "The server was acting as a gateway or proxy and received an invalid response from the upstream server."))
   val ServiceUnavailable            = reg(e(503)("Service Unavailable", "The server is currently unavailable (because it is overloaded or down for maintenance)."))
   val GatewayTimeout                = reg(e(504)("Gateway Timeout", "The server was acting as a gateway or proxy and did not receive a timely response from the upstream server."))
-  val HTTPVersionNotSupported       = reg(e(505)("HTTP Version Not Supported", "The server does not support the HTTP protocol version used in the request."))
+  val HttpVersionNotSupported       = reg(e(505)("HTTP Version Not Supported", "The server does not support the HTTP protocol version used in the request."))
+  @deprecated("deprecated in favor of HttpVersionNotSupported", "10.1.11")
+  val HTTPVersionNotSupported       = HttpVersionNotSupported
   val VariantAlsoNegotiates         = reg(e(506)("Variant Also Negotiates", "Transparent content negotiation for the request, results in a circular reference."))
   val InsufficientStorage           = reg(e(507)("Insufficient Storage", "Insufficient storage to complete the request."))
   val LoopDetected                  = reg(e(508)("Loop Detected", "The server detected an infinite loop while processing the request."))

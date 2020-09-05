@@ -1,34 +1,34 @@
 /*
- * Copyright (C) 2017-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2017-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.engine.client
 
 import akka.http.impl.engine.client.OutgoingConnectionBlueprint.PrepareResponse
 import akka.http.impl.engine.parsing.ParserOutput
-import akka.http.impl.engine.parsing.ParserOutput.{ StrictEntityCreator, EntityStreamError, EntityChunk, StreamedEntityCreator }
+import akka.http.impl.engine.parsing.ParserOutput.{ EntityChunk, EntityStreamError, StreamedEntityCreator, StrictEntityCreator }
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.settings.ParserSettings
 import akka.stream.{ ActorMaterializer, Attributes }
 import akka.stream.scaladsl.{ Sink, Source }
-import akka.stream.testkit.{ TestSubscriber, TestPublisher }
+import akka.stream.testkit.{ TestPublisher, TestSubscriber }
 import akka.util.ByteString
 import akka.testkit.AkkaSpec
 
 class PrepareResponseSpec extends AkkaSpec {
 
-  val parserSettings = ParserSettings(system)
+  val parserSettings = ParserSettings.forServer(system)
 
   val chunkedStart = ParserOutput.ResponseStart(
     StatusCodes.OK,
     HttpProtocols.`HTTP/1.1`,
     List(),
-    StreamedEntityCreator[ParserOutput, ResponseEntity] { entityChunks ⇒
+    StreamedEntityCreator[ParserOutput, ResponseEntity] { entityChunks =>
       val chunks = entityChunks.collect {
-        case EntityChunk(chunk)      ⇒ chunk
-        case EntityStreamError(info) ⇒ throw EntityStreamException(info)
+        case EntityChunk(chunk)      => chunk
+        case EntityStreamError(info) => throw EntityStreamException(info)
       }
-      HttpEntity.Chunked(ContentTypes.`application/octet-stream`, HttpEntity.limitableChunkSource(chunks))
+      HttpEntity.Chunked(ContentTypes.`application/octet-stream`, chunks)
     },
     closeRequested = false)
 
@@ -49,7 +49,7 @@ class PrepareResponseSpec extends AkkaSpec {
       implicit val mat = ActorMaterializer()
 
       val inProbe = TestPublisher.manualProbe[ParserOutput.ResponseOutput]()
-      val responseProbe = TestSubscriber.manualProbe[HttpResponse]
+      val responseProbe = TestSubscriber.manualProbe[HttpResponse]()
 
       Source.fromPublisher(inProbe)
         .via(new PrepareResponse(parserSettings))
@@ -94,7 +94,7 @@ class PrepareResponseSpec extends AkkaSpec {
       implicit val mat = ActorMaterializer()
 
       val inProbe = TestPublisher.manualProbe[ParserOutput.ResponseOutput]()
-      val responseProbe = TestSubscriber.manualProbe[HttpResponse]
+      val responseProbe = TestSubscriber.manualProbe[HttpResponse]()
 
       Source.fromPublisher(inProbe)
         .via(new PrepareResponse(parserSettings))
@@ -130,7 +130,7 @@ class PrepareResponseSpec extends AkkaSpec {
       implicit val mat = ActorMaterializer()
 
       val inProbe = TestPublisher.manualProbe[ParserOutput.ResponseOutput]()
-      val responseProbe = TestSubscriber.manualProbe[HttpResponse]
+      val responseProbe = TestSubscriber.manualProbe[HttpResponse]()
 
       Source.fromPublisher(inProbe)
         .via(new PrepareResponse(parserSettings))
@@ -171,7 +171,7 @@ class PrepareResponseSpec extends AkkaSpec {
       implicit val mat = ActorMaterializer()
 
       val inProbe = TestPublisher.manualProbe[ParserOutput.ResponseOutput]()
-      val responseProbe = TestSubscriber.manualProbe[HttpResponse]
+      val responseProbe = TestSubscriber.manualProbe[HttpResponse]()
 
       Source.fromPublisher(inProbe)
         .via(new PrepareResponse(parserSettings))
@@ -199,7 +199,7 @@ class PrepareResponseSpec extends AkkaSpec {
       implicit val mat = ActorMaterializer()
 
       val inProbe = TestPublisher.manualProbe[ParserOutput.ResponseOutput]()
-      val responseProbe = TestSubscriber.manualProbe[HttpResponse]
+      val responseProbe = TestSubscriber.manualProbe[HttpResponse]()
 
       Source.fromPublisher(inProbe)
         .via(new PrepareResponse(parserSettings))

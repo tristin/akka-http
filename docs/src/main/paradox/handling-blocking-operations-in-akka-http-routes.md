@@ -66,7 +66,7 @@ For example, the above screenshot shows an Akka FJP dispatchers threads,
 named "`default-akka.default-dispatcher2,3,4`" going into the blocking state, after having been idle. 
 It can be observed that the number of new threads increases, "`default-akka.actor.default-dispatcher 18,19,20,...`" 
 however they go to sleep state immediately, thus wasting the resources.
-@java[The same happens to the global @unidoc[ForkJoinPool] when using Java Futures.]
+@java[The same happens to the global @apidoc[ForkJoinPool] when using Java Futures.]
 
 The number of such new threads depends on the default dispatcher configuration,
 but it will likely not exceed 50. Since many POST requests are being processed, the entire
@@ -93,7 +93,7 @@ my-blocking-dispatcher {
 }
 ```
 
-There are many dispatcher options available which can be found in @extref[Dispatchers](akka-docs:scala/dispatchers.html).
+There are many dispatcher options available which can be found in @extref[Dispatchers](akka-docs:dispatchers.html).
 
 Here `thread-pool-executor` is used, which has a hardcoded limit of threads. It keeps a set number of threads
 available that allow for safe isolation of the blocking operations. The size settings should depend on the app's

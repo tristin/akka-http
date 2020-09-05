@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.engine.parsing
@@ -15,9 +15,10 @@ import akka.stream.ActorMaterializer
 import akka.stream.scaladsl._
 import akka.stream.TLSProtocol._
 import org.scalatest.matchers.Matcher
-import org.scalatest.{ BeforeAndAfterAll, FreeSpec, Matchers }
-import akka.http.scaladsl.settings.ParserSettings
+import org.scalatest.BeforeAndAfterAll
+import akka.http.scaladsl.settings.{ ParserSettings, WebSocketSettings }
 import akka.http.impl.engine.parsing.ParserOutput._
+import akka.http.impl.settings.WebSocketSettingsImpl
 import akka.http.impl.util._
 import akka.http.scaladsl.model.HttpEntity._
 import akka.http.scaladsl.model.HttpMethods._
@@ -31,14 +32,16 @@ import akka.http.scaladsl.model.headers._
 import akka.http.scaladsl.util.FastFuture
 import akka.http.scaladsl.util.FastFuture._
 import akka.testkit._
+import org.scalatest.freespec.AnyFreeSpec
+import org.scalatest.matchers.should.Matchers
 
-abstract class RequestParserSpec(mode: String, newLine: String) extends FreeSpec with Matchers with BeforeAndAfterAll {
+abstract class RequestParserSpec(mode: String, newLine: String) extends AnyFreeSpec with Matchers with BeforeAndAfterAll {
   val testConf: Config = ConfigFactory.parseString("""
     akka.event-handlers = ["akka.testkit.TestEventListener"]
     akka.loglevel = WARNING
     akka.http.parsing.max-header-value-length = 32
     akka.http.parsing.max-uri-length = 40
-    akka.http.parsing.max-content-length = 4000000000""")
+    akka.http.parsing.max-content-length = infinite""")
   implicit val system = ActorSystem(getClass.getSimpleName, testConf)
   import system.dispatcher
 
@@ -259,9 +262,9 @@ abstract class RequestParserSpec(mode: String, newLine: String) extends FreeSpec
       "with incorrect but harmless whitespace after chunk size" in new Test {
         Seq(
           start,
-          """|0\u0020\u0020
-             |
-             |""") should generalMultiParseTo(
+          s"""|0${"  " /* explicit trailing spaces */ }
+              |
+              |""") should generalMultiParseTo(
             Right(baseRequest.withEntity(Chunked(`application/pdf`, source(LastChunk)))))
         closeAfterResponseCompletion shouldEqual Seq(false)
       }
@@ -311,7 +314,7 @@ abstract class RequestParserSpec(mode: String, newLine: String) extends FreeSpec
 
     "support `rawRequestUriHeader` setting" in new Test {
       override protected def newParser: HttpRequestParser =
-        new HttpRequestParser(parserSettings, rawRequestUriHeader = true, headerParser = HttpHeaderParser(parserSettings, system.log))
+        new HttpRequestParser(parserSettings, websocketSettings, rawRequestUriHeader = true, headerParser = HttpHeaderParser(parserSettings, system.log))
 
       """GET /f%6f%6fbar?q=b%61z HTTP/1.1
         |Host: ping
@@ -331,8 +334,11 @@ abstract class RequestParserSpec(mode: String, newLine: String) extends FreeSpec
       val `application/custom`: WithFixedCharset =
         MediaType.customWithFixedCharset("application", "custom", HttpCharsets.`UTF-8`)
 
+      val `APPLICATION/CuStOm+JsOn`: WithFixedCharset =
+        MediaType.customWithFixedCharset("APPLICATION", "CuStOm+JsOn", HttpCharsets.`UTF-8`)
+
       override protected def parserSettings: ParserSettings =
-        super.parserSettings.withCustomMediaTypes(`application/custom`)
+        super.parserSettings.withCustomMediaTypes(`application/custom`, `APPLICATION/CuStOm+JsOn`)
 
       """POST / HTTP/1.1
         |Host: ping
@@ -345,6 +351,30 @@ abstract class RequestParserSpec(mode: String, newLine: String) extends FreeSpec
           "/",
           List(Host("ping")),
           HttpEntity.empty(`application/custom`)))
+
+      """POST / HTTP/1.1
+        |Host: ping
+        |Content-Type: application/custom+json
+        |Content-Length: 0
+        |
+        |""" should parseTo(
+        HttpRequest(
+          POST,
+          "/",
+          List(Host("ping")),
+          HttpEntity.empty(`APPLICATION/CuStOm+JsOn`)))
+
+      """POST / HTTP/1.1
+        |Host: ping
+        |Content-Type: APPLICATION/CUSTOM+JSON
+        |Content-Length: 0
+        |
+        |""" should parseTo(
+        HttpRequest(
+          POST,
+          "/",
+          List(Host("ping")),
+          HttpEntity.empty(`APPLICATION/CuStOm+JsOn`)))
 
       """POST / HTTP/1.1
         |Host: ping
@@ -508,16 +538,26 @@ abstract class RequestParserSpec(mode: String, newLine: String) extends FreeSpec
           ErrorInfo("HTTP message must not contain more than one Content-Length header"))
       }
 
+      "two Host headers" in new Test {
+        """GET / HTTP/1.1
+          |Host: api.example.com
+          |Host: akka.io
+          |
+          |foo""" should parseToError(
+          BadRequest,
+          ErrorInfo("HTTP message must not contain more than one Host header"))
+      }
+
       "a too-long URI" in new Test {
         "GET /2345678901234567890123456789012345678901 HTTP/1.1" should parseToError(
-          RequestUriTooLong,
+          UriTooLong,
           ErrorInfo("URI length exceeds the configured limit of 40 characters"))
       }
 
       "HTTP version 1.2" in new Test {
         """GET / HTTP/1.2
           |""" should parseToError(
-          HTTPVersionNotSupported,
+          HttpVersionNotSupported,
           ErrorInfo("The server does not support the HTTP protocol version used in the request."))
       }
 
@@ -587,8 +627,8 @@ abstract class RequestParserSpec(mode: String, newLine: String) extends FreeSpec
 
     class StrictEqualHttpRequest(val req: HttpRequest) {
       override def equals(other: scala.Any): Boolean = other match {
-        case other: StrictEqualHttpRequest ⇒
-          this.req.copy(entity = HttpEntity.Empty) == other.req.copy(entity = HttpEntity.Empty) &&
+        case other: StrictEqualHttpRequest =>
+          this.req.withEntity(HttpEntity.Empty) == other.req.withEntity(HttpEntity.Empty) &&
             this.req.entity.toStrict(awaitAtMost).awaitResult(awaitAtMost) ==
             other.req.entity.toStrict(awaitAtMost).awaitResult(awaitAtMost)
       }
@@ -627,24 +667,24 @@ abstract class RequestParserSpec(mode: String, newLine: String) extends FreeSpec
 
     def multiParse(parser: HttpRequestParser)(input: Seq[String]): Seq[Either[RequestOutput, StrictEqualHttpRequest]] =
       Source(input.toList)
-        .map(bytes ⇒ SessionBytes(TLSPlacebo.dummySession, ByteString(bytes)))
+        .map(bytes => SessionBytes(TLSPlacebo.dummySession, ByteString(bytes)))
         .via(parser).named("parser")
-        .splitWhen(x ⇒ x.isInstanceOf[MessageStart] || x.isInstanceOf[EntityStreamError])
+        .splitWhen(x => x.isInstanceOf[MessageStart] || x.isInstanceOf[EntityStreamError])
         .prefixAndTail(1)
         .collect {
-          case (Seq(RequestStart(method, uri, protocol, headers, createEntity, _, close)), entityParts) ⇒
+          case (Seq(RequestStart(method, uri, protocol, attrs, headers, createEntity, _, close)), entityParts) =>
             closeAfterResponseCompletion :+= close
             Right(HttpRequest(method, uri, headers, createEntity(entityParts), protocol))
-          case (Seq(x @ (MessageStartError(_, _) | EntityStreamError(_))), rest) ⇒
+          case (Seq(x @ (MessageStartError(_, _) | EntityStreamError(_))), rest) =>
             rest.runWith(Sink.cancelled)
             Left(x)
         }
         .concatSubstreams
-        .flatMapConcat { x ⇒
+        .flatMapConcat { x =>
           Source.fromFuture {
             x match {
-              case Right(request) ⇒ compactEntity(request.entity).fast.map(x ⇒ Right(request.withEntity(x)))
-              case Left(error)    ⇒ FastFuture.successful(Left(error))
+              case Right(request) => compactEntity(request.entity).fast.map(x => Right(request.withEntity(x)))
+              case Left(error)    => FastFuture.successful(Left(error))
             }
           }
         }
@@ -653,17 +693,18 @@ abstract class RequestParserSpec(mode: String, newLine: String) extends FreeSpec
         .awaitResult(awaitAtMost)
 
     protected def parserSettings: ParserSettings = ParserSettings(system)
-    protected def newParser = new HttpRequestParser(parserSettings, false, HttpHeaderParser(parserSettings, system.log))
+    protected def websocketSettings: WebSocketSettings = WebSocketSettingsImpl.serverFromRoot(system.settings.config)
+    protected def newParser = new HttpRequestParser(parserSettings, websocketSettings, false, HttpHeaderParser(parserSettings, system.log))
 
     private def compactEntity(entity: RequestEntity): Future[RequestEntity] =
       entity match {
-        case x: Chunked ⇒ compactEntityChunks(x.chunks).fast.map(compacted ⇒ x.copy(chunks = source(compacted: _*)))
-        case _          ⇒ entity.toStrict(awaitAtMost)
+        case x: Chunked => compactEntityChunks(x.chunks).fast.map(compacted => x.copy(chunks = source(compacted: _*)))
+        case _          => entity.toStrict(awaitAtMost)
       }
 
     private def compactEntityChunks(data: Source[ChunkStreamPart, Any]): Future[Seq[ChunkStreamPart]] =
       data.limit(100000).runWith(Sink.seq)
-        .fast.recover { case _: NoSuchElementException ⇒ Nil }
+        .fast.recover { case _: NoSuchElementException => Nil }
 
     def prep(response: String) = response.stripMarginWithNewline(newLine)
   }

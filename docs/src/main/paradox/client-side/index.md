@@ -7,6 +7,8 @@ It is recommended to first read the @ref[Implications of the streaming nature of
 as it explains the underlying full-stack streaming concepts, which may be unexpected when coming
 from a background with non-"streaming first" HTTP Clients.
 
+All of the APIs deal with @ref[`HttpRequest` and `HttpResponse`](request-and-response.md) objects.
+
 Depending on your application's specific needs you can choose from three different API levels:
 
 @ref[Request-Level Client-Side API](request-level.md)
@@ -14,7 +16,7 @@ Depending on your application's specific needs you can choose from three differe
 
 @ref[Host-Level Client-Side API](host-level.md)
 : for letting Akka HTTP manage a connection-pool to *one specific* host/port endpoint. Recommended when
-  the user can supply a @unidoc[Source[HttpRequest, \_]] with requests to run against a single host
+  the user can supply a @apidoc[Source[HttpRequest, \_]] with requests to run against a single host
   over multiple pooled connections.
 
 @ref[Connection-Level Client-Side API](connection-level.md)
@@ -28,6 +30,8 @@ Akka HTTP will happily handle many thousand concurrent connections to a single o
 
 @@@ index
 
+* [configuration](configuration.md)
+* [request-and-response](request-and-response.md)
 * [request-level](request-level.md)
 * [host-level](host-level.md)
 * [connection-level](connection-level.md)

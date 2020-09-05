@@ -1,15 +1,15 @@
 /*
- * Copyright (C) 2017-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2017-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.javadsl.settings
 
 import java.util.Optional
 
-import akka.actor.ActorSystem
+import akka.actor.{ ActorSystem, ClassicActorSystemProvider }
 import akka.http.impl.engine.parsing.BodyPartParser
 import akka.http.impl.settings.ParserSettingsImpl
-import java.{ util ⇒ ju }
+import java.{ util => ju }
 
 import akka.annotation.DoNotInherit
 import akka.http.impl.util.JavaMapping.Implicits._
@@ -23,7 +23,7 @@ import com.typesafe.config.Config
  * Public API but not intended for subclassing
  */
 @DoNotInherit
-abstract class ParserSettings private[akka] () extends BodyPartParser.Settings { self: ParserSettingsImpl ⇒
+abstract class ParserSettings private[akka] () extends BodyPartParser.Settings { self: ParserSettingsImpl =>
   def getMaxUriLength: Int
   def getMaxMethodLength: Int
   def getMaxResponseReasonLength: Int
@@ -31,6 +31,7 @@ abstract class ParserSettings private[akka] () extends BodyPartParser.Settings {
   def getMaxHeaderValueLength: Int
   def getMaxHeaderCount: Int
   def getMaxContentLength: Long
+  def getMaxToStrictBytes: Long
   def getMaxChunkExtLength: Int
   def getMaxChunkSize: Int
   def getUriParsingMode: Uri.ParsingMode
@@ -55,7 +56,8 @@ abstract class ParserSettings private[akka] () extends BodyPartParser.Settings {
   def withMaxHeaderNameLength(newValue: Int): ParserSettings = self.copy(maxHeaderNameLength = newValue)
   def withMaxHeaderValueLength(newValue: Int): ParserSettings = self.copy(maxHeaderValueLength = newValue)
   def withMaxHeaderCount(newValue: Int): ParserSettings = self.copy(maxHeaderCount = newValue)
-  def withMaxContentLength(newValue: Long): ParserSettings = self.copy(maxContentLength = newValue)
+  def withMaxContentLength(newValue: Long): ParserSettings = self.copy(maxContentLengthSetting = Some(newValue))
+  def withMaxToStrictBytes(newValue: Long): ParserSettings = self.copy(maxToStrictBytes = newValue)
   def withMaxChunkExtLength(newValue: Int): ParserSettings = self.copy(maxChunkExtLength = newValue)
   def withMaxChunkSize(newValue: Int): ParserSettings = self.copy(maxChunkSize = newValue)
   def withUriParsingMode(newValue: Uri.ParsingMode): ParserSettings = self.copy(uriParsingMode = newValue.asScala)
@@ -71,18 +73,18 @@ abstract class ParserSettings private[akka] () extends BodyPartParser.Settings {
 
   @varargs
   def withCustomMethods(methods: HttpMethod*): ParserSettings = {
-    val map = methods.map(m ⇒ m.name → m.asScala).toMap
+    val map = methods.map(m => m.name -> m.asScala).toMap
     self.copy(customMethods = map.get)
   }
   @varargs
   def withCustomStatusCodes(codes: StatusCode*): ParserSettings = {
-    val map = codes.map(c ⇒ c.intValue → c.asScala).toMap
+    val map = codes.map(c => c.intValue -> c.asScala).toMap
     self.copy(customStatusCodes = map.get)
   }
   @varargs
   def withCustomMediaTypes(mediaTypes: MediaType*): ParserSettings = {
-    val map = mediaTypes.map(c ⇒ (c.mainType, c.subType) → c.asScala).toMap
-    self.copy(customMediaTypes = (main, sub) ⇒ map.get(main → sub))
+    val map = mediaTypes.map(c => (c.mainType, c.subType) -> c.asScala).toMap
+    self.copy(customMediaTypes = (main, sub) => map.get(main -> sub))
   }
 
 }
@@ -92,7 +94,25 @@ object ParserSettings extends SettingsCompanion[ParserSettings] {
   trait ErrorLoggingVerbosity
   trait IllegalResponseHeaderValueProcessingMode
 
+  /**
+   * @deprecated Use forServer or forClient instead.
+   */
+  @Deprecated
+  @deprecated("Use forServer or forClient instead", since = "10.2.0")
   override def create(config: Config): ParserSettings = ParserSettingsImpl(config)
+  /**
+   * @deprecated Use forServer or forClient instead.
+   */
+  @Deprecated
+  @deprecated("Use forServer or forClient instead", since = "10.2.0")
   override def create(configOverrides: String): ParserSettings = ParserSettingsImpl(configOverrides)
+  /**
+   * @deprecated Use forServer or forClient instead.
+   */
+  @Deprecated
+  @deprecated("Use forServer or forClient instead", since = "10.2.0")
   override def create(system: ActorSystem): ParserSettings = create(system.settings.config)
+
+  def forServer(system: ClassicActorSystemProvider): ParserSettings = akka.http.scaladsl.settings.ParserSettings.forServer(system)
+  def forClient(system: ClassicActorSystemProvider): ParserSettings = akka.http.scaladsl.settings.ParserSettings.forClient(system)
 }

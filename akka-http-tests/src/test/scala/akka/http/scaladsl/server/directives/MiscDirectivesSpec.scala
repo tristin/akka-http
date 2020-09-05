@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.server
@@ -13,11 +13,11 @@ import akka.testkit._
 import headers._
 import java.net.InetAddress
 
-class MiscDirectivesSpec extends RoutingSpec {
+import akka.http.scaladsl.server.util.VarArgsFunction1
+import com.github.ghik.silencer.silent
 
-  override def testConfigSource = """
-    akka.loggers = ["akka.testkit.TestEventListener"]
-  """
+@silent("use remote-address-attribute instead")
+class MiscDirectivesSpec extends RoutingSpec {
 
   "the extractClientIP directive" should {
     "extract from a X-Forwarded-For header" in {
@@ -25,13 +25,18 @@ class MiscDirectivesSpec extends RoutingSpec {
         extractClientIP { echoComplete }
       } ~> check { responseAs[String] shouldEqual "2.3.4.5" }
     }
-    "extract from a Remote-Address header" in {
-      Get() ~> addHeaders(`X-Real-Ip`(remoteAddress("1.2.3.4")), `Remote-Address`(remoteAddress("5.6.7.8"))) ~> {
+    "extract from a (synthetic) Remote-Address header" in {
+      Get() ~> addHeader(`Remote-Address`(remoteAddress("1.2.3.4"))) ~> {
         extractClientIP { echoComplete }
-      } ~> check { responseAs[String] shouldEqual "5.6.7.8" }
+      } ~> check { responseAs[String] shouldEqual "1.2.3.4" }
     }
     "extract from a X-Real-IP header" in {
       Get() ~> addHeader(`X-Real-Ip`(remoteAddress("1.2.3.4"))) ~> {
+        extractClientIP { echoComplete }
+      } ~> check { responseAs[String] shouldEqual "1.2.3.4" }
+    }
+    "select X-Real-Ip when both X-Real-Ip and Remote-Address headers are present" in {
+      Get() ~> addHeaders(`X-Real-Ip`(remoteAddress("1.2.3.4")), `Remote-Address`(remoteAddress("5.6.7.8"))) ~> {
         extractClientIP { echoComplete }
       } ~> check { responseAs[String] shouldEqual "1.2.3.4" }
     }
@@ -43,19 +48,19 @@ class MiscDirectivesSpec extends RoutingSpec {
   }
 
   "the selectPreferredLanguage directive" should {
-    "Accept-Language: de, en" test { selectFrom ⇒
+    "Accept-Language: de, en" test { selectFrom =>
       selectFrom("de", "en") shouldEqual "de"
       selectFrom("en", "de") shouldEqual "en"
     }
-    "Accept-Language: en, de;q=.5" test { selectFrom ⇒
+    "Accept-Language: en, de;q=.5" test { selectFrom =>
       selectFrom("de", "en") shouldEqual "en"
       selectFrom("en", "de") shouldEqual "en"
     }
-    "Accept-Language: en;q=.5, de" test { selectFrom ⇒
+    "Accept-Language: en;q=.5, de" test { selectFrom =>
       selectFrom("de", "en") shouldEqual "de"
       selectFrom("en", "de") shouldEqual "de"
     }
-    "Accept-Language: en-US, en;q=.7, *;q=.1, de;q=.5" test { selectFrom ⇒
+    "Accept-Language: en-US, en;q=.7, *;q=.1, de;q=.5" test { selectFrom =>
       selectFrom("en", "en-US") shouldEqual "en-US"
       selectFrom("de", "en") shouldEqual "en"
       selectFrom("de", "hu") shouldEqual "de"
@@ -63,12 +68,12 @@ class MiscDirectivesSpec extends RoutingSpec {
       selectFrom("hu", "es") shouldEqual "hu"
       selectFrom("es", "hu") shouldEqual "es"
     }
-    "Accept-Language: en, *;q=.5, de;q=0" test { selectFrom ⇒
+    "Accept-Language: en, *;q=.5, de;q=0" test { selectFrom =>
       selectFrom("es", "de") shouldEqual "es"
       selectFrom("de", "es") shouldEqual "es"
       selectFrom("es", "en") shouldEqual "en"
     }
-    "Accept-Language: en, *;q=0" test { selectFrom ⇒
+    "Accept-Language: en, *;q=0" test { selectFrom =>
       selectFrom("es", "de") shouldEqual "es"
       selectFrom("de", "es") shouldEqual "de"
       selectFrom("es", "en") shouldEqual "en"
@@ -90,7 +95,7 @@ class MiscDirectivesSpec extends RoutingSpec {
 
     "apply if entity is consumed" in {
       val route = withSizeLimit(500) {
-        entity(as[String]) { _ ⇒
+        entity(as[String]) { _ =>
           completeOk
         }
       }
@@ -99,17 +104,16 @@ class MiscDirectivesSpec extends RoutingSpec {
         status shouldEqual StatusCodes.OK
       }
 
-      EventFilter[EntityStreamSizeException](occurrences = 1).intercept {
-        Post("/abc", entityOfSize(501)) ~> Route.seal(route) ~> check {
-          status shouldEqual StatusCodes.BadRequest
-        }
+      Post("/abc", entityOfSize(501)) ~> Route.seal(route) ~> check {
+        status shouldEqual StatusCodes.PayloadTooLarge
+        entityAs[String] should include("exceeded size limit")
       }
     }
 
     "apply if form data is fully consumed into a map" in {
       val route =
         withSizeLimit(64) {
-          formFieldMap { _ ⇒
+          formFieldMap { _ =>
             completeOk
           }
         }
@@ -118,15 +122,14 @@ class MiscDirectivesSpec extends RoutingSpec {
         status shouldEqual StatusCodes.OK
       }
 
-      EventFilter[EntityStreamSizeException](occurrences = 1).intercept {
-        Post("/abc", formDataOfSize(128)) ~> Route.seal(route) ~> check {
-          status shouldEqual StatusCodes.BadRequest
-          responseAs[String] shouldEqual "The request content was malformed:\n" +
-            "EntityStreamSizeException: actual entity size (Some(134)) " +
-            "exceeded content length limit (64 bytes)! " +
-            "You can configure this by setting `akka.http.[server|client].parsing.max-content-length` " +
-            "or calling `HttpEntity.withSizeLimit` before materializing the dataBytes stream."
-        }
+      Post("/abc", formDataOfSize(128)) ~> Route.seal(route) ~> check {
+        status shouldEqual StatusCodes.PayloadTooLarge
+        responseAs[String] shouldEqual "The request content was malformed:\n" +
+          "EntityStreamSizeException: incoming entity size (134) " +
+          "exceeded size limit (64 bytes)! " +
+          "This may have been a parser limit (set via `akka.http.[server|client].parsing.max-content-length`), " +
+          "a decoder limit (set via `akka.http.routing.decode-max-size`), " +
+          "or a custom limit set with `withSizeLimit`."
       }
     }
 
@@ -134,7 +137,7 @@ class MiscDirectivesSpec extends RoutingSpec {
       val route =
         withSizeLimit(500) {
           withSizeLimit(800) {
-            entity(as[String]) { _ ⇒
+            entity(as[String]) { _ =>
               completeOk
             }
           }
@@ -144,16 +147,15 @@ class MiscDirectivesSpec extends RoutingSpec {
         status shouldEqual StatusCodes.OK
       }
 
-      EventFilter[EntityStreamSizeException](occurrences = 1).intercept {
-        Post("/abc", entityOfSize(801)) ~> Route.seal(route) ~> check {
-          status shouldEqual StatusCodes.BadRequest
-        }
+      Post("/abc", entityOfSize(801)) ~> Route.seal(route) ~> check {
+        status shouldEqual StatusCodes.PayloadTooLarge
+        entityAs[String] should include("exceeded size limit")
       }
 
       val route2 =
         withSizeLimit(500) {
           withSizeLimit(400) {
-            entity(as[String]) { _ ⇒
+            entity(as[String]) { _ =>
               completeOk
             }
           }
@@ -163,10 +165,9 @@ class MiscDirectivesSpec extends RoutingSpec {
         status shouldEqual StatusCodes.OK
       }
 
-      EventFilter[EntityStreamSizeException](occurrences = 1).intercept {
-        Post("/abc", entityOfSize(401)) ~> Route.seal(route2) ~> check {
-          status shouldEqual StatusCodes.BadRequest
-        }
+      Post("/abc", entityOfSize(401)) ~> Route.seal(route2) ~> check {
+        status shouldEqual StatusCodes.PayloadTooLarge
+        entityAs[String] should include("exceeded size limit")
       }
     }
   }
@@ -176,7 +177,7 @@ class MiscDirectivesSpec extends RoutingSpec {
       val route =
         withSizeLimit(500) {
           withoutSizeLimit {
-            entity(as[String]) { _ ⇒
+            entity(as[String]) { _ =>
               completeOk
             }
           }
@@ -189,19 +190,19 @@ class MiscDirectivesSpec extends RoutingSpec {
   }
 
   implicit class AddStringToIn(acceptLanguageHeaderString: String) {
-    def test(body: ((String*) ⇒ String) ⇒ Unit): Unit =
+    def test(body: VarArgsFunction1[String, String] => Unit): Unit =
       s"properly handle `$acceptLanguageHeaderString`" in {
         val Array(name, value) = acceptLanguageHeaderString.split(':')
         val acceptLanguageHeader = HttpHeader.parse(name.trim, value) match {
-          case HttpHeader.ParsingResult.Ok(h: `Accept-Language`, Nil) ⇒ h
-          case result ⇒ fail(result.toString)
+          case HttpHeader.ParsingResult.Ok(h: `Accept-Language`, Nil) => h
+          case result => fail(result.toString)
         }
-        body { availableLangs ⇒
+        body { availableLangs =>
           val selected = Promise[String]()
           val first = Language(availableLangs.head)
           val more = availableLangs.tail.map(Language(_))
           Get() ~> addHeader(acceptLanguageHeader) ~> {
-            selectPreferredLanguage(first, more: _*) { lang ⇒
+            selectPreferredLanguage(first, more: _*) { lang =>
               complete(lang.toString)
             }
           } ~> check(selected.complete(Try(responseAs[String])))
@@ -214,5 +215,5 @@ class MiscDirectivesSpec extends RoutingSpec {
 
   private def entityOfSize(size: Int) = HttpEntity(ContentTypes.`text/plain(UTF-8)`, "0" * size)
 
-  private def formDataOfSize(size: Int) = FormData(Map("field" → ("0" * size)))
+  private def formDataOfSize(size: Int) = FormData(Map("field" -> ("0" * size)))
 }

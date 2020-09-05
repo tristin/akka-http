@@ -1,24 +1,32 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.unmarshalling
 
+import java.util.UUID
+
 import akka.http.scaladsl.unmarshalling.Unmarshaller.EitherUnmarshallingException
-import org.scalatest.{ BeforeAndAfterAll, FreeSpec, Matchers }
+import org.scalatest.BeforeAndAfterAll
 import akka.http.scaladsl.testkit.ScalatestUtils
 import akka.actor.ActorSystem
+import akka.http.scaladsl.model.MediaType.WithFixedCharset
 import akka.stream.ActorMaterializer
 import akka.http.scaladsl.model._
 import akka.testkit._
+import com.typesafe.config.ConfigFactory
 
 import scala.concurrent.duration._
 import scala.concurrent.Await
+import scala.concurrent.ExecutionContext
+import org.scalatest.freespec.AnyFreeSpec
+import org.scalatest.matchers.should.Matchers
 
-class UnmarshallingSpec extends FreeSpec with Matchers with BeforeAndAfterAll with ScalatestUtils {
+class UnmarshallingSpec extends AnyFreeSpec with Matchers with BeforeAndAfterAll with ScalatestUtils {
   implicit val system = ActorSystem(getClass.getSimpleName)
   implicit val materializer = ActorMaterializer()
-  import system.dispatcher
+
+  override val testConfig = ConfigFactory.load()
 
   "The PredefinedFromEntityUnmarshallers" - {
     "stringUnmarshaller should unmarshal `text/plain` content in UTF-8 to Strings" in {
@@ -37,11 +45,26 @@ class UnmarshallingSpec extends FreeSpec with Matchers with BeforeAndAfterAll wi
       Unmarshal("1").to[Boolean] should evaluateTo(true)
       Unmarshal("0").to[Boolean] should evaluateTo(false)
     }
+    "uuidUnmarshaller should unmarshal valid uuid" in {
+      val uuid = UUID.randomUUID()
+      Unmarshal(uuid.toString).to[UUID] should evaluateTo(uuid)
+    }
+    "uuidUnmarshaller should unmarshal variant 0 uuid" in {
+      val uuid = UUID.fromString("733a018b-5f16-4699-0e1a-1d3f6f0d0315")
+      Unmarshal(uuid.toString).to[UUID] should evaluateTo(uuid)
+    }
+    "uuidUnmarshaller should unmarshal future variant uuid" in {
+      val uuid = UUID.fromString("733a018b-5f16-4699-fe1a-1d3f6f0d0315")
+      Unmarshal(uuid.toString).to[UUID] should evaluateTo(uuid)
+    }
+    "uuidUnmarshaller should unmarshal nil uuid" in {
+      Unmarshal("00000000-0000-0000-0000-000000000000").to[UUID] should evaluateTo(UUID.fromString("00000000-0000-0000-0000-000000000000"))
+    }
   }
 
   "The GenericUnmarshallers" - {
-    implicit val rawInt: FromEntityUnmarshaller[Int] = Unmarshaller(implicit ex ⇒ bs ⇒ bs.toStrict(1.second.dilated).map(_.data.utf8String.toInt))
-    implicit val rawlong: FromEntityUnmarshaller[Long] = Unmarshaller(implicit ex ⇒ bs ⇒ bs.toStrict(1.second.dilated).map(_.data.utf8String.toLong))
+    implicit val rawInt: FromEntityUnmarshaller[Int] = Unmarshaller(implicit ex => bs => bs.toStrict(1.second.dilated).map(_.data.utf8String.toInt))
+    implicit val rawlong: FromEntityUnmarshaller[Long] = Unmarshaller(implicit ex => bs => bs.toStrict(1.second.dilated).map(_.data.utf8String.toLong))
 
     "eitherUnmarshaller should unmarshal its Right value" in {
       // we'll find:
@@ -76,9 +99,21 @@ class UnmarshallingSpec extends FreeSpec with Matchers with BeforeAndAfterAll wi
   }
 
   "Unmarshaller.forContentTypes" - {
+    implicit val ec: ExecutionContext = system.dispatcher
+
     "should handle media ranges of types with missing charset by assuming UTF-8 charset when matching" in {
       val um = Unmarshaller.stringUnmarshaller.forContentTypes(MediaTypes.`text/plain`)
       Await.result(um(HttpEntity(MediaTypes.`text/plain`.withMissingCharset, "Hêllö".getBytes("utf-8"))), 1.second.dilated) should ===("Hêllö")
+    }
+
+    "should handle custom media types case insensitively when matching" in {
+      val `application/CuStOm`: WithFixedCharset =
+        MediaType.customWithFixedCharset("application", "CuStOm", HttpCharsets.`UTF-8`)
+      val `application/custom`: WithFixedCharset =
+        MediaType.customWithFixedCharset("application", "custom", HttpCharsets.`UTF-8`)
+
+      val um = Unmarshaller.stringUnmarshaller.forContentTypes(`application/CuStOm`)
+      Await.result(um(HttpEntity(`application/custom`, "customValue")), 1.second.dilated) should ===("customValue")
     }
   }
 

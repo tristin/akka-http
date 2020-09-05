@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package docs.http.javadsl;
@@ -18,8 +18,6 @@ import akka.http.javadsl.server.Route;
 import akka.http.javadsl.settings.ParserSettings;
 import akka.http.javadsl.settings.ServerSettings;
 import akka.http.javadsl.testkit.JUnitRouteTest;
-import akka.stream.Materializer;
-import akka.util.ByteString;
 import org.junit.Test;
 
 import java.util.HashMap;
@@ -27,6 +25,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 
 import static org.junit.Assert.assertEquals;
+import static akka.util.ByteString.emptyByteString;
 
 //#application-custom-java
 import static akka.http.javadsl.server.Directives.complete;
@@ -40,7 +39,6 @@ public class CustomMediaTypesExampleTest extends JUnitRouteTest {
   public void customMediaTypes() throws ExecutionException, InterruptedException {
 
     final ActorSystem system = system();
-    final Materializer materializer = materializer();
     final String host = "127.0.0.1";
 
     //#application-custom-java
@@ -52,7 +50,7 @@ public class CustomMediaTypesExampleTest extends JUnitRouteTest {
         false); // No arbitrary subtypes are allowed
 
     // Add custom media type to parser settings:
-    final ParserSettings parserSettings = ParserSettings.create(system)
+    final ParserSettings parserSettings = ParserSettings.forServer(system)
       .withCustomMediaTypes(applicationCustom);
     final ServerSettings serverSettings = ServerSettings.create(system)
       .withParserSettings(parserSettings);
@@ -62,12 +60,11 @@ public class CustomMediaTypesExampleTest extends JUnitRouteTest {
         + req.entity().getContentType().getClass())
     );
 
-    final CompletionStage<ServerBinding> binding = Http.get(system)
-      .bindAndHandle(route.flow(system, materializer),
-        ConnectHttp.toHost(host, 0),
-        serverSettings,
-        system.log(),
-        materializer);
+    final CompletionStage<ServerBinding> binding =
+      Http.get(system)
+        .newServerAt(host, 0)
+        .withSettings(serverSettings)
+        .bind(route);
 
     //#application-custom-java
     final ServerBinding serverBinding = binding.toCompletableFuture().get();
@@ -77,13 +74,13 @@ public class CustomMediaTypesExampleTest extends JUnitRouteTest {
     final HttpResponse response = Http.get(system)
       .singleRequest(HttpRequest
         .GET("http://" + host + ":" + port + "/")
-        .withEntity(applicationCustom.toContentType(), "~~example~=~value~~"), materializer)
+        .withEntity(applicationCustom.toContentType(), "~~example~=~value~~"))
       .toCompletableFuture()
       .get();
 
     assertEquals(StatusCodes.OK, response.status());
-    final String body = response.entity().toStrict(1000, materializer).toCompletableFuture().get()
-      .getDataBytes().runFold(ByteString.empty(), (a, b) -> a.$plus$plus(b), materializer)
+    final String body = response.entity().toStrict(1000, system).toCompletableFuture().get()
+      .getDataBytes().runFold(emptyByteString(), (a, b) -> a.$plus$plus(b), system)
       .toCompletableFuture().get().utf8String();
     assertEquals("application/custom = class akka.http.scaladsl.model.ContentType$WithFixedCharset", body); // it's the Scala DSL package because it's the only instance of the Java DSL
   }

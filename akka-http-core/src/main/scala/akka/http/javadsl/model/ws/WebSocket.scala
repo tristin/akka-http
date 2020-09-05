@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.javadsl.model.ws
@@ -15,8 +15,8 @@ object WebSocket {
    * returned.
    */
   def handleWebSocketRequestWith(request: HttpRequest, handler: Flow[Message, Message, _]): HttpResponse =
-    request.asScala.header[UpgradeToWebSocket] match {
-      case Some(header) ⇒ header.handleMessagesWith(handler)
-      case None         ⇒ HttpResponse.create().withStatus(StatusCodes.BAD_REQUEST).withEntity("Expected WebSocket request")
+    request.asScala.attribute(AttributeKeys.webSocketUpgrade) match {
+      case Some(header) => header.handleMessagesWith(handler)
+      case None         => HttpResponse.create().withStatus(StatusCodes.BAD_REQUEST).withEntity("Expected WebSocket request")
     }
 }

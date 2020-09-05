@@ -1,13 +1,13 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.javadsl.server
 package directives
 
-import java.lang.{ Iterable ⇒ JIterable }
+import java.lang.{ Iterable => JIterable }
 import java.util.function.BooleanSupplier
-import java.util.function.{ Function ⇒ JFunction }
+import java.util.function.{ Function => JFunction }
 import java.util.function.Supplier
 
 import scala.collection.JavaConverters._
@@ -16,7 +16,7 @@ import akka.http.javadsl.model.RemoteAddress
 import akka.http.javadsl.model.headers.Language
 import akka.http.impl.util.JavaMapping.Implicits._
 
-import akka.http.scaladsl.server.{ Directives ⇒ D }
+import akka.http.scaladsl.server.{ Directives => D }
 
 abstract class MiscDirectives extends MethodDirectives {
 
@@ -29,11 +29,12 @@ abstract class MiscDirectives extends MethodDirectives {
   }
 
   /**
-   * Extracts the client's IP from either the X-Forwarded-For, Remote-Address or X-Real-IP header
+   * Extracts the client's IP from either the X-Forwarded-For, Remote-Address, X-Real-IP header
+   * or [[akka.http.javadsl.model.AttributeKeys.remoteAddress]] attribute
    * (in that order of priority).
    */
   def extractClientIP(inner: JFunction[RemoteAddress, Route]): Route = RouteAdapter {
-    D.extractClientIP { ip ⇒ inner.apply(ip).delegate }
+    D.extractClientIP { ip => inner.apply(ip).delegate }
   }
 
   /**
@@ -96,9 +97,9 @@ abstract class MiscDirectives extends MethodDirectives {
    */
   def selectPreferredLanguage(languages: JIterable[Language], inner: JFunction[Language, Route]): Route = RouteAdapter {
     languages.asScala.toList match {
-      case head :: tail ⇒
-        D.selectPreferredLanguage(head.asScala, tail.map(_.asScala).toSeq: _*) { lang ⇒ inner.apply(lang).delegate }
-      case _ ⇒
+      case head :: tail =>
+        D.selectPreferredLanguage(head.asScala, tail.map(_.asScala): _*) { lang => inner.apply(lang).delegate }
+      case _ =>
         D.reject()
     }
   }

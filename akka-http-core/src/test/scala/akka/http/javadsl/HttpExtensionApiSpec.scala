@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2017-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.javadsl
@@ -13,38 +13,28 @@ import akka.http.javadsl.ConnectHttp._
 import akka.http.javadsl.model.ws._
 import akka.http.javadsl.settings.{ ClientConnectionSettings, ConnectionPoolSettings, ServerSettings }
 import akka.japi.Pair
-import akka.actor.ActorSystem
 import akka.event.NoLogging
+import akka.http.impl.util.AkkaSpecWithMaterializer
 import akka.http.javadsl.model._
-import akka.japi.Function
-import akka.stream.ActorMaterializer
+import akka.japi.function.Function
 import akka.stream.javadsl.{ Flow, Keep, Sink, Source }
 import akka.stream.testkit.TestSubscriber
-import akka.testkit.{ SocketUtil, TestKit }
-import com.typesafe.config.ConfigFactory
-import org.scalatest.{ BeforeAndAfterAll, Matchers, WordSpec }
 
 import scala.util.Try
 
-class HttpExtensionApiSpec extends WordSpec with Matchers with BeforeAndAfterAll {
+class HttpExtensionApiSpec extends AkkaSpecWithMaterializer(
+  """
+    akka.http.server.log-unencrypted-network-bytes = 100
+    akka.http.client.log-unencrypted-network-bytes = 100
+    akka.http.server.request-timeout = infinite
+    akka.io.tcp.trace-logging = true
+  """
+) {
 
   // tries to cover all surface area of javadsl.Http
 
   type Host = String
   type Port = Int
-
-  implicit val system = {
-    val testConf = ConfigFactory.parseString("""
-    akka.loggers = ["akka.testkit.TestEventListener"]
-    akka.loglevel = ERROR
-    akka.stdout-loglevel = ERROR
-    windows-connection-abort-workaround-enabled = auto
-    akka.log-dead-letters = OFF
-    akka.http.server.request-timeout = infinite""")
-
-    ActorSystem(getClass.getSimpleName, testConf)
-  }
-  implicit val materializer = ActorMaterializer()
 
   val http = Http.get(system)
   val connectionContext = ConnectionContext.noEncryption()
@@ -69,9 +59,8 @@ class HttpExtensionApiSpec extends WordSpec with Matchers with BeforeAndAfterAll
 
     // all four bind method overloads
     "properly bind a server (with three parameters)" in {
-      val (host, port) = SocketUtil.temporaryServerHostnameAndPort()
       val probe = TestSubscriber.manualProbe[IncomingConnection]()
-      val binding = http.bind(toHost(host, port), materializer)
+      val binding = http.newServerAt("127.0.0.1", 0).connectionSource()
         .toMat(Sink.fromSubscriber(probe), Keep.left)
         .run(materializer)
       val sub = probe.expectSubscription()
@@ -80,9 +69,8 @@ class HttpExtensionApiSpec extends WordSpec with Matchers with BeforeAndAfterAll
     }
 
     "properly bind a server (with four parameters)" in {
-      val (host, port) = SocketUtil.temporaryServerHostnameAndPort()
       val probe = TestSubscriber.manualProbe[IncomingConnection]()
-      val binding = http.bind(toHost(host, port), materializer)
+      val binding = http.newServerAt("127.0.0.1", 0).connectionSource()
         .toMat(Sink.fromSubscriber(probe), Keep.left)
         .run(materializer)
       val sub = probe.expectSubscription()
@@ -91,9 +79,10 @@ class HttpExtensionApiSpec extends WordSpec with Matchers with BeforeAndAfterAll
     }
 
     "properly bind a server (with five parameters)" in {
-      val (host, port) = SocketUtil.temporaryServerHostnameAndPort()
       val probe = TestSubscriber.manualProbe[IncomingConnection]()
-      val binding = http.bind(toHost(host, port), serverSettings, materializer)
+      val binding = http.newServerAt("127.0.0.1", 0)
+        .withSettings(serverSettings)
+        .connectionSource()
         .toMat(Sink.fromSubscriber(probe), Keep.left)
         .run(materializer)
       val sub = probe.expectSubscription()
@@ -102,9 +91,11 @@ class HttpExtensionApiSpec extends WordSpec with Matchers with BeforeAndAfterAll
     }
 
     "properly bind a server (with six parameters)" in {
-      val (host, port) = SocketUtil.temporaryServerHostnameAndPort()
       val probe = TestSubscriber.manualProbe[IncomingConnection]()
-      val binding = http.bind(toHost(host, port), serverSettings, loggingAdapter, materializer)
+      val binding = http.newServerAt("127.0.0.1", 0)
+        .withSettings(serverSettings)
+        .logTo(loggingAdapter)
+        .connectionSource()
         .toMat(Sink.fromSubscriber(probe), Keep.left)
         .run(materializer)
       val sub = probe.expectSubscription()
@@ -115,66 +106,67 @@ class HttpExtensionApiSpec extends WordSpec with Matchers with BeforeAndAfterAll
     abstract class TestSetup {
       def bind(): CompletionStage[ServerBinding]
 
-      val (host, port) = SocketUtil.temporaryServerHostnameAndPort()
-
       val flow: Flow[HttpRequest, HttpResponse, NotUsed] = akka.stream.scaladsl.Flow[HttpRequest]
-        .map(req ⇒ HttpResponse.create())
+        .map(req => HttpResponse.create())
         .asJava
       val binding = waitFor(bind())
+      val (host, port) = (binding.localAddress.getHostString, binding.localAddress.getPort)
 
-      val (_, completion) = http.outgoingConnection(toHost(host, port))
-        .runWith(Source.single(HttpRequest.create("/abc")), Sink.head(), materializer).toScala
+      val completion =
+        Source.single(HttpRequest.create("/abc"))
+          .via(http.outgoingConnection(toHost(host, port)))
+          .runWith(Sink.head[HttpResponse](), materializer)
 
       waitFor(completion)
       waitFor(binding.unbind())
     }
 
     // this cover both bind and single request
-    "properly bind and handle a server with a flow (with three parameters)" in new TestSetup {
-      def bind() = http.bindAndHandle(flow, toHost(host, port), materializer)
+    "properly bind and handle a server with a flow (simple)" in new TestSetup {
+      def bind() = http.newServerAt("127.0.0.1", 0).bindFlow(flow)
     }
 
-    "properly bind and handle a server with a flow (with 5 parameters)" in new TestSetup {
-      def bind() = http.bindAndHandle(flow, toHost(host, port), materializer)
+    "properly bind and handle a server with a flow (with settings and log)" in new TestSetup {
+      def bind() = http.newServerAt("127.0.0.1", 0).withSettings(serverSettings).logTo(loggingAdapter).bindFlow(flow)
     }
 
-    "properly bind and handle a server with a synchronous function (with three parameters)" in new TestSetup {
-      def bind() = http.bindAndHandleSync(httpSuccessFunction, toHost(host, port), materializer)
+    "properly bind and handle a server with a synchronous function (simple)" in new TestSetup {
+      def bind() = http.newServerAt("127.0.0.1", 0).bindSync(httpSuccessFunction)
     }
 
-    "properly bind and handle a server with a synchronous (with seven parameters)" in new TestSetup {
-      def bind() = http.bindAndHandleSync(httpSuccessFunction, toHost(host, port), serverSettings, loggingAdapter, materializer)
+    "properly bind and handle a server with a synchronous (with settings and log)" in new TestSetup {
+      def bind() = http.newServerAt("127.0.0.1", 0).withSettings(serverSettings).logTo(loggingAdapter).bindSync(httpSuccessFunction)
     }
 
-    "properly bind and handle a server with an asynchronous function (with three parameters)" in new TestSetup {
-      def bind() = http.bindAndHandleAsync(asyncHttpSuccessFunction, toHost(host, port), materializer)
+    "properly bind and handle a server with an asynchronous function (simple)" in new TestSetup {
+      def bind() = http.newServerAt("127.0.0.1", 0).bind(asyncHttpSuccessFunction)
     }
 
-    "properly bind and handle a server with an asynchronous function (with eight parameters)" in new TestSetup {
-      def bind() = http.bindAndHandleAsync(asyncHttpSuccessFunction, toHost(host, port), serverSettings, 1, loggingAdapter, materializer)
+    "properly bind and handle a server with an asynchronous function (with settings and log)" in new TestSetup {
+      def bind() = http.newServerAt("127.0.0.1", 0).withSettings(serverSettings).logTo(loggingAdapter).bind(asyncHttpSuccessFunction)
     }
 
     "have serverLayer methods" in {
       // TODO actually cover these with runtime tests, compile only for now
       pending
 
-      http.serverLayer(materializer)
+      http.serverLayer()
 
       val serverSettings = ServerSettings.create(system)
-      http.serverLayer(serverSettings, materializer)
+      http.serverLayer(serverSettings)
 
       val remoteAddress = Optional.empty[InetSocketAddress]()
-      http.serverLayer(serverSettings, remoteAddress, materializer)
+      http.serverLayer(serverSettings, remoteAddress)
 
       val loggingAdapter = NoLogging
-      http.serverLayer(serverSettings, remoteAddress, loggingAdapter, materializer)
+      http.serverLayer(serverSettings, remoteAddress, loggingAdapter)
     }
 
     "create a cached connection pool (with a ConnectToHttp and a materializer)" in {
       val (host, port, binding) = runServer()
 
       val poolFlow: Flow[Pair[HttpRequest, NotUsed], Pair[Try[HttpResponse], NotUsed], HostConnectionPool] =
-        http.cachedHostConnectionPool[NotUsed](toHost(host, port), materializer)
+        http.cachedHostConnectionPool[NotUsed](toHost(host, port))
 
       val pair: Pair[HostConnectionPool, CompletionStage[Pair[Try[HttpResponse], NotUsed]]] =
         Source.single(new Pair(HttpRequest.GET(s"http://$host:$port/"), NotUsed.getInstance()))
@@ -194,7 +186,7 @@ class HttpExtensionApiSpec extends WordSpec with Matchers with BeforeAndAfterAll
       val (host, port, binding) = runServer()
 
       val poolFlow: Flow[Pair[HttpRequest, NotUsed], Pair[Try[HttpResponse], NotUsed], HostConnectionPool] =
-        http.cachedHostConnectionPool[NotUsed](toHost(host, port), poolSettings, loggingAdapter, materializer)
+        http.cachedHostConnectionPool[NotUsed](toHost(host, port), poolSettings, loggingAdapter)
 
       val pair: Pair[HostConnectionPool, CompletionStage[Pair[Try[HttpResponse], NotUsed]]] =
         Source.single(new Pair(HttpRequest.GET(s"http://$host:$port/"), NotUsed.getInstance()))
@@ -212,7 +204,7 @@ class HttpExtensionApiSpec extends WordSpec with Matchers with BeforeAndAfterAll
       val (host, port, binding) = runServer()
 
       val poolFlow: Flow[Pair[HttpRequest, NotUsed], Pair[Try[HttpResponse], NotUsed], HostConnectionPool] =
-        http.cachedHostConnectionPool[NotUsed](s"http://$host:$port", materializer)
+        http.cachedHostConnectionPool[NotUsed](s"http://$host:$port")
 
       val pair: Pair[HostConnectionPool, CompletionStage[Pair[Try[HttpResponse], NotUsed]]] =
         Source.single(new Pair(HttpRequest.GET(s"http://$host:$port/"), NotUsed.getInstance()))
@@ -240,7 +232,7 @@ class HttpExtensionApiSpec extends WordSpec with Matchers with BeforeAndAfterAll
           .run(materializer)
 
       waitFor(pair.second).first.get.status() should be(StatusCodes.OK)
-      pair.first.shutdown(system.dispatcher)
+      pair.first.shutdown()
       waitFor(binding.unbind())
     }
 
@@ -260,7 +252,7 @@ class HttpExtensionApiSpec extends WordSpec with Matchers with BeforeAndAfterAll
           .run(materializer)
 
       waitFor(pair.second).first.get.status() should be(StatusCodes.OK)
-      pair.first.shutdown(system.dispatcher)
+      pair.first.shutdown()
       waitFor(binding.unbind())
     }
 
@@ -278,7 +270,7 @@ class HttpExtensionApiSpec extends WordSpec with Matchers with BeforeAndAfterAll
           .run(materializer)
 
       waitFor(pair.second).first.get.status() should be(StatusCodes.OK)
-      pair.first.shutdown(system.dispatcher)
+      pair.first.shutdown()
       waitFor(binding.unbind())
     }
 
@@ -337,7 +329,7 @@ class HttpExtensionApiSpec extends WordSpec with Matchers with BeforeAndAfterAll
 
     "allow a single request (with two parameters)" in {
       val (host, port, binding) = runServer()
-      val response = http.singleRequest(HttpRequest.GET(s"http://$host:$port/"), materializer)
+      val response = http.singleRequest(HttpRequest.GET(s"http://$host:$port/"))
 
       waitFor(response).status() should be(StatusCodes.OK)
       waitFor(binding.unbind())
@@ -345,7 +337,7 @@ class HttpExtensionApiSpec extends WordSpec with Matchers with BeforeAndAfterAll
 
     "allow a single request (with three parameters)" in {
       val (host, port, binding) = runServer()
-      val response = http.singleRequest(HttpRequest.GET(s"http://$host:$port/"), http.defaultClientHttpsContext, materializer)
+      val response = http.singleRequest(HttpRequest.GET(s"http://$host:$port/"), http.defaultClientHttpsContext)
 
       waitFor(response).status() should be(StatusCodes.OK)
       waitFor(binding.unbind())
@@ -353,7 +345,7 @@ class HttpExtensionApiSpec extends WordSpec with Matchers with BeforeAndAfterAll
 
     "allow a single request (with five parameters)" in {
       val (host, port, binding) = runServer()
-      val response = http.singleRequest(HttpRequest.GET(s"http://$host:$port/"), http.defaultClientHttpsContext, poolSettings, loggingAdapter, materializer)
+      val response = http.singleRequest(HttpRequest.GET(s"http://$host:$port/"), http.defaultClientHttpsContext, poolSettings, loggingAdapter)
 
       waitFor(response).status() should be(StatusCodes.OK)
       waitFor(binding.unbind())
@@ -390,26 +382,21 @@ class HttpExtensionApiSpec extends WordSpec with Matchers with BeforeAndAfterAll
   def get(host: Host, port: Port) = HttpRequest.GET("/").addHeader(headers.Host.create(host, port))
 
   def runServer(): (Host, Port, ServerBinding) = {
-    val (host, port) = SocketUtil.temporaryServerHostnameAndPort()
-    val server = http.bindAndHandleSync(httpSuccessFunction, toHost(host, port), materializer)
+    val server = http.newServerAt("127.0.0.1", 0).bindSync(httpSuccessFunction)
 
-    (host, port, waitFor(server))
+    val binding = waitFor(server)
+    (binding.localAddress.getHostString, binding.localAddress.getPort, binding)
   }
 
   def runWebsocketServer(): (Host, Port, ServerBinding) = {
-    val (host, port) = SocketUtil.temporaryServerHostnameAndPort()
-    val server = http.bindAndHandleSync(new Function[HttpRequest, HttpResponse] {
+    val server = http.newServerAt("127.0.0.1", 0).bindSync(request =>
+      WebSocket.handleWebSocketRequestWith(request, Flow.create[Message]())
+    )
 
-      override def apply(request: HttpRequest): HttpResponse = {
-        WebSocket.handleWebSocketRequestWith(request, Flow.create[Message]())
-      }
-    }, toHost(host, port), materializer)
-
-    (host, port, waitFor(server))
+    val binding = waitFor(server)
+    (binding.localAddress.getHostString, binding.localAddress.getPort, binding)
   }
 
   private def waitFor[T](completionStage: CompletionStage[T]): T =
     completionStage.toCompletableFuture.get(10, TimeUnit.SECONDS)
-
-  override protected def afterAll() = TestKit.shutdownActorSystem(system)
 }

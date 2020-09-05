@@ -1,35 +1,30 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.unmarshalling
 
-import scala.concurrent.duration._
-import scala.concurrent.{ Await, Future }
-import org.scalatest.matchers.Matcher
-import org.scalatest.{ BeforeAndAfterAll, FreeSpec, Matchers }
-import akka.http.scaladsl.testkit.ScalatestUtils
-import akka.util.ByteString
-import akka.actor.ActorSystem
-import akka.stream.ActorMaterializer
-import akka.stream.scaladsl._
-import akka.http.scaladsl.model._
-import akka.http.scaladsl.util.FastFuture._
 import akka.http.impl.util._
+import akka.http.scaladsl.model.MediaTypes._
+import akka.http.scaladsl.model._
 import akka.http.scaladsl.model.headers._
-import MediaTypes._
+import akka.http.scaladsl.util.FastFuture._
+import akka.stream.scaladsl._
 import akka.testkit._
+import akka.util.ByteString
+import org.scalatest.matchers.Matcher
 
-trait MultipartUnmarshallersSpec extends FreeSpec with Matchers with BeforeAndAfterAll with ScalatestUtils {
-  implicit val system = ActorSystem(getClass.getSimpleName)
-  implicit val materializer = ActorMaterializer()
-  import system.dispatcher
+import scala.concurrent.duration._
+import scala.concurrent.{ Await, ExecutionContext, Future }
+
+trait MultipartUnmarshallersSpec extends AkkaSpecWithMaterializer {
+  implicit val ec: ExecutionContext = system.dispatcher
 
   def lineFeed: String
 
-  "The MultipartUnmarshallers." - {
+  "The MultipartUnmarshallers." should {
 
-    "multipartGeneralUnmarshaller should correctly unmarshal 'multipart/*' content with" - {
+    "multipartGeneralUnmarshaller should correctly unmarshal 'multipart/*' content with" should {
       "an empty part" in {
         val entity = HttpEntity(
           `multipart/mixed` withBoundary "XYZABC",
@@ -70,7 +65,7 @@ trait MultipartUnmarshallersSpec extends FreeSpec with Matchers with BeforeAndAf
                         |
                         |Perfectly fine part content.
                         |--XYZABC--""".stripMarginWithNewline(lineFeed)
-        val byteStrings = content.map(c ⇒ ByteString(c.toString)) // one-char ByteStrings
+        val byteStrings = content.map(c => ByteString(c.toString)) // one-char ByteStrings
         Unmarshal(HttpEntity.Default(`multipart/mixed` withBoundary "XYZABC", content.length, Source(byteStrings)))
           .to[Multipart.General] should haveParts(
             Multipart.General.BodyPart.Strict(HttpEntity(ContentTypes.`text/plain(UTF-8)`, "Perfectly fine part content.")))
@@ -86,7 +81,7 @@ trait MultipartUnmarshallersSpec extends FreeSpec with Matchers with BeforeAndAf
                        |-----""".stripMarginWithNewline(lineFeed)))).to[Multipart.General] should haveParts(
           Multipart.General.BodyPart.Strict(
             HttpEntity(ContentTypes.`text/plain(UTF-8)`, "test@there.com"),
-            List(`Content-Disposition`(ContentDispositionTypes.`form-data`, Map("name" → "email")))))
+            List(`Content-Disposition`(ContentDispositionTypes.`form-data`, Map("name" -> "email")))))
       }
       "two different parts" in {
         Unmarshal(HttpEntity(
@@ -119,7 +114,7 @@ trait MultipartUnmarshallersSpec extends FreeSpec with Matchers with BeforeAndAf
             HttpEntity(ContentTypes.`text/plain(UTF-8)`, "test@there.com"),
             List(
               RawHeader("date", "unknown"),
-              `Content-Disposition`(ContentDispositionTypes.`form-data`, Map("name" → "email"))))))
+              `Content-Disposition`(ContentDispositionTypes.`form-data`, Map("name" -> "email"))))))
       "a full example (Strict)" in {
         Unmarshal(HttpEntity(
           `multipart/mixed` withBoundary "12345",
@@ -138,6 +133,24 @@ trait MultipartUnmarshallersSpec extends FreeSpec with Matchers with BeforeAndAf
           Multipart.General.BodyPart.Strict(HttpEntity(ContentTypes.`text/plain(UTF-8)`, "first part, implicitly typed")),
           Multipart.General.BodyPart.Strict(HttpEntity(`application/octet-stream`, ByteString("second part, explicitly typed"))))
       }
+      "a full example (Strict) containing a CR in the body part" in {
+        Unmarshal(HttpEntity(
+          `multipart/mixed` withBoundary "12345",
+          ByteString("""preamble and
+                       |more preamble
+                       |--12345
+                       |
+                       |first part, impliINSERT_CR_HEREcitly typed
+                       |--12345
+                       |Content-Type: application/octet-stream
+                       |
+                       |second part, explicitly typed
+                       |--12345--
+                       |epilogue and
+                       |more epilogue""".stripMarginWithNewline(lineFeed).replaceAll("INSERT_CR_HERE", "\r")))).to[Multipart.General] should haveParts(
+          Multipart.General.BodyPart.Strict(HttpEntity(ContentTypes.`text/plain(UTF-8)`, "first part, impli\rcitly typed")),
+          Multipart.General.BodyPart.Strict(HttpEntity(`application/octet-stream`, ByteString("second part, explicitly typed"))))
+      }
       "a full example (Default)" in {
         val content = """preamble and
                         |more preamble
@@ -151,10 +164,29 @@ trait MultipartUnmarshallersSpec extends FreeSpec with Matchers with BeforeAndAf
                         |--12345--
                         |epilogue and
                         |more epilogue""".stripMarginWithNewline(lineFeed)
-        val byteStrings = content.map(c ⇒ ByteString(c.toString)) // one-char ByteStrings
+        val byteStrings = content.map(c => ByteString(c.toString)) // one-char ByteStrings
         Unmarshal(HttpEntity.Default(`multipart/mixed` withBoundary "12345", content.length, Source(byteStrings)))
           .to[Multipart.General] should haveParts(
             Multipart.General.BodyPart.Strict(HttpEntity(ContentTypes.`text/plain(UTF-8)`, "first part, implicitly typed")),
+            Multipart.General.BodyPart.Strict(HttpEntity(`application/octet-stream`, ByteString("second part, explicitly typed"))))
+      }
+      "a full example (Default) containing a CR in the body part" in {
+        val content = """preamble and
+                        |more preamble
+                        |--12345
+                        |
+                        |first paINSERT_CR_HERErt, implicitly typed
+                        |--12345
+                        |Content-Type: application/octet-stream
+                        |
+                        |second part, explicitly typed
+                        |--12345--
+                        |epilogue and
+                        |more epilogue""".stripMarginWithNewline(lineFeed).replaceAll("INSERT_CR_HERE", "\r")
+        val byteStrings = content.map(c => ByteString(c.toString)) // one-char ByteStrings
+        Unmarshal(HttpEntity.Default(`multipart/mixed` withBoundary "12345", content.length, Source(byteStrings)))
+          .to[Multipart.General] should haveParts(
+            Multipart.General.BodyPart.Strict(HttpEntity(ContentTypes.`text/plain(UTF-8)`, "first pa\rrt, implicitly typed")),
             Multipart.General.BodyPart.Strict(HttpEntity(`application/octet-stream`, ByteString("second part, explicitly typed"))))
       }
       "a boundary with spaces" in {
@@ -184,7 +216,7 @@ trait MultipartUnmarshallersSpec extends FreeSpec with Matchers with BeforeAndAf
       }
     }
 
-    "multipartGeneralUnmarshaller should reject illegal multipart content with" - {
+    "multipartGeneralUnmarshaller should reject illegal multipart content with" should {
       "an empty entity" in {
         Await.result(Unmarshal(HttpEntity(`multipart/mixed` withBoundary "XYZABC", ByteString.empty))
           .to[Multipart.General].failed, 1.second.dilated).getMessage shouldEqual "Unexpected end of multipart entity"
@@ -234,7 +266,7 @@ trait MultipartUnmarshallersSpec extends FreeSpec with Matchers with BeforeAndAf
                         |---
                         |not ok
                         |-----""".stripMarginWithNewline(lineFeed)
-        val byteStrings = content.map(c ⇒ ByteString(c.toString)) // one-char ByteStrings
+        val byteStrings = content.map(c => ByteString(c.toString)) // one-char ByteStrings
         val contentType = `multipart/form-data` withBoundary "-"
         Await.result(Unmarshal(HttpEntity.Default(contentType, content.length, Source(byteStrings)))
           .to[Multipart.General]
@@ -272,7 +304,7 @@ trait MultipartUnmarshallersSpec extends FreeSpec with Matchers with BeforeAndAf
         Multipart.ByteRanges.BodyPart.Strict(ContentRange(23, 25, 26), HttpEntity(ContentTypes.`text/plain(UTF-8)`, "XYZ")))
     }
 
-    "multipartFormDataUnmarshaller should correctly unmarshal 'multipart/form-data' content" - {
+    "multipartFormDataUnmarshaller should correctly unmarshal 'multipart/form-data' content" should {
       "with one element and no explicit content-type" in {
         Unmarshal(HttpEntity(
           `multipart/form-data` withBoundary "XYZABC",
@@ -334,7 +366,7 @@ trait MultipartUnmarshallersSpec extends FreeSpec with Matchers with BeforeAndAf
             })
         }.to[Multipart.FormData].flatMap(_.toStrict(1.second.dilated)) should haveParts(
           Multipart.FormData.BodyPart.Strict("email", HttpEntity(`application/octet-stream`, ByteString("test@there.com"))),
-          Multipart.FormData.BodyPart.Strict("userfile", HttpEntity(`application/pdf`, ByteString("filecontent")), Map("filename" → "test€.dat"),
+          Multipart.FormData.BodyPart.Strict("userfile", HttpEntity(`application/pdf`, ByteString("filecontent")), Map("filename" -> "test€.dat"),
             List(
               RawHeader("Content-Transfer-Encoding", "binary"),
               RawHeader("Content-Additional-1", "anything"),
@@ -359,10 +391,8 @@ trait MultipartUnmarshallersSpec extends FreeSpec with Matchers with BeforeAndAf
     }
   }
 
-  override def afterAll() = TestKit.shutdownActorSystem(system)
-
   def haveParts[T <: Multipart](parts: Multipart.BodyPart.Strict*): Matcher[Future[T]] =
-    equal(parts).matcher[Seq[Multipart.BodyPart.Strict]] compose { x ⇒
+    equal(parts).matcher[Seq[Multipart.BodyPart.Strict]] compose { x =>
       Await.result(x
         .fast.flatMap {
           _.parts
@@ -370,7 +400,7 @@ trait MultipartUnmarshallersSpec extends FreeSpec with Matchers with BeforeAndAf
             .grouped(100)
             .runWith(Sink.head)
         }
-        .fast.recover { case _: NoSuchElementException ⇒ Nil }, 1.second.dilated)
+        .fast.recover { case _: NoSuchElementException => Nil }, 1.second.dilated)
     }
 }
 

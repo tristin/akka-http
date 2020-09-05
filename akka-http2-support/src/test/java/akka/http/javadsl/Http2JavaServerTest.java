@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2018-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.javadsl;
@@ -9,7 +9,7 @@ import akka.http.impl.util.ExampleHttpContexts;
 import akka.http.javadsl.model.HttpRequest;
 import akka.http.javadsl.model.HttpResponse;
 import akka.http.javadsl.HttpsConnectionContext;
-import akka.japi.Function;
+import akka.japi.function.Function;
 import akka.stream.ActorMaterializer;
 import akka.stream.Materializer;
 import com.typesafe.config.Config;
@@ -38,11 +38,9 @@ public class Http2JavaServerTest {
 
     HttpsConnectionContext httpsConnectionContext = ExampleHttpContexts.getExampleServerContext();
 
-    Http.get(system).bindAndHandleAsync(
-      handler,
-      ConnectWithHttps.toHostHttps("localhost", 9001)
-        .withCustomHttpsContext(httpsConnectionContext),
-      materializer);
+    Http.get(system).newServerAt("localhost", 9001)
+        .enableHttps(httpsConnectionContext)
+        .bind(handler);
 
     // TODO what about unencrypted http2?
   }

@@ -4,13 +4,13 @@
 
 ## Signature
 
-@@signature [BasicDirectives.scala]($akka-http$/akka-http/src/main/scala/akka/http/scaladsl/server/directives/BasicDirectives.scala) { #mapRequestContext }
+@@signature [BasicDirectives.scala](/akka-http/src/main/scala/akka/http/scaladsl/server/directives/BasicDirectives.scala) { #mapRequestContext }
 
 @@@
 
 ## Description
 
-Transforms the @unidoc[RequestContext] before it is passed to the inner route.
+Transforms the @apidoc[RequestContext] before it is passed to the inner route.
 
 The `mapRequestContext` directive is used as a building block for @ref[Custom Directives](../custom-directives.md) to transform
 the request context before it is passed to the inner route. To change only the request value itself the

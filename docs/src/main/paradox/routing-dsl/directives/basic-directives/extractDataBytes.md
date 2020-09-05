@@ -4,13 +4,13 @@
 
 ## Signature
 
-@@signature [BasicDirectives.scala]($akka-http$/akka-http/src/main/scala/akka/http/scaladsl/server/directives/BasicDirectives.scala) { #extractDataBytes }
+@@signature [BasicDirectives.scala](/akka-http/src/main/scala/akka/http/scaladsl/server/directives/BasicDirectives.scala) { #extractDataBytes }
 
 @@@
 
 ## Description
 
-Extracts the entities data bytes as @unidoc[Source[ByteString, \_]] from the @unidoc[RequestContext].
+Extracts the entities data bytes as @apidoc[Source[ByteString, \_]] from the @apidoc[RequestContext].
 
 The directive returns a stream containing the request data bytes.
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.util
@@ -118,9 +118,9 @@ private[http] object Renderer {
 
   def defaultSeqRenderer[T: Renderer] = genericSeqRenderer[Renderable, T](Rendering.`, `, Rendering.Empty)
   def seqRenderer[T: Renderer](separator: String = ", ", empty: String = "") = genericSeqRenderer[String, T](separator, empty)
-  def genericSeqRenderer[S, T](separator: S, empty: S)(implicit sRenderer: Renderer[S], tRenderer: Renderer[T]): Renderer[immutable.Seq[T]] =
-    new Renderer[immutable.Seq[T]] {
-      def render[R <: Rendering](r: R, value: immutable.Seq[T]): r.type = {
+  def genericSeqRenderer[S, T](separator: S, empty: S)(implicit sRenderer: Renderer[S], tRenderer: Renderer[T]): Renderer[immutable.Iterable[T]] =
+    new Renderer[immutable.Iterable[T]] {
+      def render[R <: Rendering](r: R, value: immutable.Iterable[T]): r.type = {
         @tailrec def recI(values: IndexedSeq[T], ix: Int = 0): r.type =
           if (ix < values.size) {
             if (ix > 0) sRenderer.render(r, separator)
@@ -136,9 +136,9 @@ private[http] object Renderer {
           } else r
 
         value match {
-          case Nil              ⇒ r ~~ empty
-          case x: IndexedSeq[T] ⇒ recI(x)
-          case x: LinearSeq[T]  ⇒ recL(x)
+          case Nil              => r ~~ empty
+          case x: IndexedSeq[T] => recI(x)
+          case x: LinearSeq[T]  => recL(x)
         }
       }
     }
@@ -307,7 +307,7 @@ private[http] class ByteStringRendering(sizeHint: Int) extends Rendering {
   private[this] val builder = new ByteStringBuilder
   builder.sizeHint(sizeHint)
 
-  def get: ByteString = builder.result
+  def get: ByteString = builder.result()
 
   def ~~(char: Char): this.type = {
     builder += char.toByte

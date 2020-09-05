@@ -1,12 +1,10 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.javadsl.server.directives;
 
-import akka.http.javadsl.model.HttpRequest;
-import akka.http.javadsl.model.StatusCodes;
-import akka.http.javadsl.model.Uri;
+import akka.http.javadsl.model.*;
 import akka.http.javadsl.model.headers.Location;
 import akka.http.javadsl.server.Directives;
 import akka.http.javadsl.testkit.JUnitRouteTest;
@@ -15,7 +13,8 @@ import akka.stream.javadsl.Sink;
 import akka.util.ByteString;
 import org.junit.Test;
 
-import static akka.http.javadsl.server.Directives.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 
 public class RouteDirectivesTest extends JUnitRouteTest {
 
@@ -90,7 +89,53 @@ public class RouteDirectivesTest extends JUnitRouteTest {
 
     route
       .run(HttpRequest.create("/limit-5").withEntity("1234567890"))
-      .assertStatusCode(StatusCodes.INTERNAL_SERVER_ERROR)
+      .assertStatusCode(StatusCodes.PAYLOAD_TOO_LARGE)
+      .assertEntity("EntityStreamSizeException: incoming entity size (10) exceeded size limit (5 bytes)! " +
+              "This may have been a parser limit (set via `akka.http.[server|client].parsing.max-content-length`), " +
+	      "a decoder limit (set via `akka.http.routing.decode-max-size`), " +
+              "or a custom limit set with `withSizeLimit`.");
+  }
+
+  @Test(expected = IllegalArgumentException.class)
+  public void testEmptyRoutesConcatenation() {
+    route();
+  }
+
+  @Test
+  public void testRouteFromFunction() {
+    TestRoute route = testRoute(
+      handle(req ->
+        // CompletableFuture.completedStage isn't available until Java 9
+        CompletableFuture.supplyAsync(() -> HttpResponse.create().withEntity(HttpEntities.create(req.getUri().toString())))
+      )
+    );
+
+    route.run(HttpRequest.create("/foo"))
+      .assertEntity("http://example.com/foo");
+  }
+
+  @Test
+  public void testRouteFromFailingFunction() {
+    TestRoute route = testRoute(
+      handle(req ->
+        // CompletableFuture.failedStage/failedFuture aren't available until Java 9
+        CompletableFuture.supplyAsync(() -> { throw new IllegalStateException("x"); })
+      ),
+      complete(StatusCodes.IM_A_TEAPOT)
+    );
+
+    route.run(HttpRequest.create("/foo"))
+      .assertEntity("There was an internal server error.");
+  }
+
+  @Test
+  public void testRouteWhenLambdaThrows() {
+    TestRoute route = testRoute(
+      handle(req -> { throw new IllegalStateException("x"); }),
+      complete(StatusCodes.IM_A_TEAPOT)
+    );
+
+    route.run(HttpRequest.create("/foo"))
       .assertEntity("There was an internal server error.");
   }
 }

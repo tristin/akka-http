@@ -4,13 +4,13 @@
 
 ## Signature
 
-@@signature [BasicDirectives.scala]($akka-http$/akka-http/src/main/scala/akka/http/scaladsl/server/directives/BasicDirectives.scala) { #extractExecutionContext }
+@@signature [BasicDirectives.scala](/akka-http/src/main/scala/akka/http/scaladsl/server/directives/BasicDirectives.scala) { #extractExecutionContext }
 
 @@@
 
 ## Description
 
-Extracts the `ExecutionContext` from the @unidoc[RequestContext].
+Extracts the `ExecutionContext` from the @apidoc[RequestContext].
 
 See @ref[withExecutionContext](withExecutionContext.md) to see how to customise the execution context provided for an inner route.
 

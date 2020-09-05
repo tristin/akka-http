@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.javadsl.server
@@ -10,8 +10,8 @@ import akka.http.scaladsl.server._
 import akka.http.javadsl.model._
 import akka.http.javadsl.model.headers.{ ByteRange, HttpEncoding, HttpChallenge }
 import java.util.Optional
-import java.util.function.{ Function ⇒ JFunction }
-import java.lang.{ Iterable ⇒ JIterable }
+import java.util.function.{ Function => JFunction }
+import java.lang.{ Iterable => JIterable }
 
 import akka.annotation.DoNotInherit
 import akka.http.scaladsl
@@ -110,6 +110,15 @@ trait MalformedFormFieldRejection extends Rejection {
 @DoNotInherit
 trait MissingHeaderRejection extends Rejection {
   def headerName: String
+}
+
+/**
+ * Rejection created by attribute directives.
+ * Signals that the request was rejected because a required request attribute could not be found.
+ */
+@DoNotInherit
+trait MissingAttributeRejection[T] extends Rejection {
+  def key: AttributeKey[T]
 }
 
 /**
@@ -339,7 +348,7 @@ trait RejectionError extends RuntimeException {
 }
 
 object Rejections {
-  import akka.http.scaladsl.{ server ⇒ s }
+  import akka.http.scaladsl.{ server => s }
   import JavaMapping.Implicits._
   import RoutingJavaMapping._
 
@@ -376,8 +385,18 @@ object Rejections {
   def malformedHeader(headerName: String, errorMsg: String, cause: Optional[Throwable]): s.MalformedHeaderRejection =
     s.MalformedHeaderRejection(headerName, errorMsg, cause.asScala)
 
+  def unsupportedRequestContentType(
+    supported:   java.lang.Iterable[MediaType],
+    contentType: Optional[ContentType]): UnsupportedRequestContentTypeRejection =
+    s.UnsupportedRequestContentTypeRejection(
+      supported = supported.asScala.map(m => scaladsl.model.ContentTypeRange(m.asScala)).toSet,
+      contentType = contentType.asScala.map(_.asScala))
+
+  // for backwards compatibility
   def unsupportedRequestContentType(supported: java.lang.Iterable[MediaType]): UnsupportedRequestContentTypeRejection =
-    s.UnsupportedRequestContentTypeRejection(supported.asScala.map(m ⇒ scaladsl.model.ContentTypeRange(m.asScala)).toSet)
+    s.UnsupportedRequestContentTypeRejection(
+      supported = supported.asScala.map(m => scaladsl.model.ContentTypeRange(m.asScala)).toSet,
+      contentType = None)
 
   def unsupportedRequestEncoding(supported: HttpEncoding): UnsupportedRequestEncodingRejection =
     s.UnsupportedRequestEncodingRejection(supported.asScala)
@@ -395,8 +414,8 @@ object Rejections {
   def unacceptedResponseContentType(
     supportedContentTypes: java.lang.Iterable[ContentType],
     supportedMediaTypes:   java.lang.Iterable[MediaType]): UnacceptedResponseContentTypeRejection = {
-    val s1: Set[Alternative] = supportedContentTypes.asScala.map(_.asScala).map(ct ⇒ ContentNegotiator.Alternative(ct)).toSet
-    val s2: Set[Alternative] = supportedMediaTypes.asScala.map(_.asScala).map(mt ⇒ ContentNegotiator.Alternative(mt)).toSet
+    val s1: Set[Alternative] = supportedContentTypes.asScala.map(_.asScala).map(ct => ContentNegotiator.Alternative(ct)).toSet
+    val s2: Set[Alternative] = supportedMediaTypes.asScala.map(_.asScala).map(mt => ContentNegotiator.Alternative(mt)).toSet
     s.UnacceptedResponseContentTypeRejection(s1 ++ s2)
   }
 
@@ -425,7 +444,7 @@ object Rejections {
     s.ValidationRejection(message, cause.asScala)
 
   def transformationRejection(f: java.util.function.Function[java.util.List[Rejection], java.util.List[Rejection]]) =
-    s.TransformationRejection(rejections ⇒ f.apply(rejections.map(_.asJava).asJava).asScala.toVector.map(_.asScala)) // TODO this is maddness
+    s.TransformationRejection(rejections => f.apply(rejections.map(_.asJava).asJava).asScala.toVector.map(_.asScala)) // TODO this is maddness
 
   def rejectionError(rejection: Rejection) =
     s.RejectionError(convertToScala(rejection))

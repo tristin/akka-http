@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.server
@@ -11,7 +11,8 @@ import akka.util.ByteString
 import akka.stream.scaladsl.{ Sink, Source }
 import akka.http.impl.util._
 import akka.http.scaladsl.model._
-import akka.http.scaladsl.coding._
+import akka.http.scaladsl.coding.Encoder
+import akka.http.scaladsl.coding.Coders._
 import akka.testkit._
 import headers._
 import HttpEntity.{ Chunk, ChunkStreamPart }
@@ -26,13 +27,9 @@ import scala.concurrent.duration._
 
 class CodingDirectivesSpec extends RoutingSpec with Inside {
 
-  override def testConfigSource = """
-    akka.loggers = ["akka.testkit.TestEventListener"]
-  """
-
   implicit val routeTestTimeout = RouteTestTimeout(3.seconds.dilated)
 
-  val echoRequestContent: Route = { ctx ⇒ ctx.complete(ctx.request.entity.dataBytes.utf8String) }
+  val echoRequestContent: Route = { ctx => ctx.complete(ctx.request.entity.dataBytes.utf8String) }
 
   val yeah = complete("Yeah!")
   lazy val yeahGzipped = compress("Yeah!", Gzip)
@@ -41,7 +38,7 @@ class CodingDirectivesSpec extends RoutingSpec with Inside {
   lazy val helloGzipped = compress("Hello", Gzip)
   lazy val helloDeflated = compress("Hello", Deflate)
 
-  val nope = complete((404, "Nope!"))
+  val nope = complete(404, "Nope!")
   lazy val nopeGzipped = compress("Nope!", Gzip)
   lazy val nopeDeflated = compress("Nope!", Deflate)
 
@@ -65,7 +62,7 @@ class CodingDirectivesSpec extends RoutingSpec with Inside {
 
     val echoDecodedEntity =
       decodeRequestWith(NoCoding) {
-        extractRequest { request ⇒
+        extractRequest { request =>
           complete(HttpResponse(200, entity = request.entity))
         }
       }
@@ -85,7 +82,7 @@ class CodingDirectivesSpec extends RoutingSpec with Inside {
 
       Post("/", defaultEntity) ~> echoDecodedEntity ~> check {
         inside(responseEntity) {
-          case HttpEntity.Default(`application/octet-stream`, 9, dataChunks) ⇒
+          case HttpEntity.Default(`application/octet-stream`, 9, dataChunks) =>
             dataChunks.grouped(1000).runWith(Sink.head).awaitResult(1.second.dilated).toVector shouldEqual chunks
         }
       }
@@ -101,7 +98,7 @@ class CodingDirectivesSpec extends RoutingSpec with Inside {
 
       Post("/", defaultEntity) ~> echoDecodedEntity ~> check {
         inside(responseEntity) {
-          case HttpEntity.Chunked(`application/octet-stream`, dataChunks) ⇒
+          case HttpEntity.Chunked(`application/octet-stream`, dataChunks) =>
             dataChunks.grouped(1000).runWith(Sink.head).awaitResult(1.second.dilated).toVector shouldEqual chunks
         }
       }
@@ -115,8 +112,8 @@ class CodingDirectivesSpec extends RoutingSpec with Inside {
       } ~> check { responseAs[String] shouldEqual "Hello" }
     }
     "reject the request content if it has encoding 'gzip' but is corrupt" in {
-      // FIXME this causes both an error and a warning for the same request
-      EventFilter[IllegalRequestException](occurrences = 1).intercept {
+      // make sure there are no extra error logs
+      EventFilter[IllegalRequestException](occurrences = 0).intercept {
         EventFilter.warning(start = "Illegal request", occurrences = 1).intercept {
           Post("/", fromHexDump("000102")) ~> `Content-Encoding`(gzip) ~> {
             decodeRequestWith(Gzip) {
@@ -130,8 +127,8 @@ class CodingDirectivesSpec extends RoutingSpec with Inside {
       }
     }
     "reject truncated gzip request content" in {
-      // FIXME this causes both an error and a warning for the same request
-      EventFilter[IllegalRequestException](occurrences = 1).intercept {
+      // make sure there are no extra error logs
+      EventFilter[IllegalRequestException](occurrences = 0).intercept {
         EventFilter.warning(start = "Illegal request", occurrences = 1).intercept {
           Post("/", helloGzipped.dropRight(2)) ~> `Content-Encoding`(gzip) ~> {
             decodeRequestWith(Gzip) {
@@ -208,7 +205,7 @@ class CodingDirectivesSpec extends RoutingSpec with Inside {
     }
     "not encode the response content with Deflate if the response is of status not allowing entity" in {
       Post() ~> {
-        encodeResponseWith(Deflate) { complete((100, "Let's continue!")) }
+        encodeResponseWith(Deflate) { complete(100, "Let's continue!") }
       } ~> check {
         response should haveNoContentEncoding
         response shouldEqual HttpResponse(StatusCodes.Continue, entity = HttpEntity.Empty)
@@ -260,7 +257,7 @@ class CodingDirectivesSpec extends RoutingSpec with Inside {
     "correctly encode the chunk stream produced by a chunked response" in {
       val text = "This is a somewhat lengthy text that is being chunked by the autochunk directive!"
       val textChunks =
-        () ⇒ text.grouped(8).map { chars ⇒
+        () => text.grouped(8).map { chars =>
           Chunk(chars.mkString): ChunkStreamPart
         }
       val chunkedTextEntity = HttpEntity.Chunked(ContentTypes.`text/plain(UTF-8)`, Source.fromIterator(textChunks))
@@ -467,8 +464,8 @@ class CodingDirectivesSpec extends RoutingSpec with Inside {
       Post("/", "yes") ~> decodeRequest { echoRequestContent } ~> check { responseAs[String] shouldEqual "yes" }
     }
     "reject the request if it has a `Content-Encoding: deflate` header but the request is encoded with Gzip" in {
-      // FIXME this causes both an error and a warning for the same request
-      EventFilter[IllegalRequestException](occurrences = 1).intercept {
+      // make sure there are no extra error logs
+      EventFilter[IllegalRequestException](occurrences = 0).intercept {
         EventFilter.warning(start = "Illegal request", occurrences = 1).intercept {
           Post("/", helloGzipped) ~> `Content-Encoding`(deflate) ~>
             decodeRequest {
@@ -551,13 +548,10 @@ class CodingDirectivesSpec extends RoutingSpec with Inside {
     }
   }
 
-  def compress(input: String, encoder: Encoder): ByteString = {
-    val compressor = encoder.newCompressor
-    compressor.compressAndFlush(ByteString(input)) ++ compressor.finish()
-  }
+  def compress(input: String, encoder: Encoder): ByteString = encoder.encodeAsync(ByteString(input)).awaitResult(3.seconds.dilated)
 
   def hexDump(bytes: Array[Byte]) = bytes.map("%02x" format _).mkString
-  def fromHexDump(dump: String) = dump.grouped(2).toArray.map(chars ⇒ Integer.parseInt(new String(chars), 16).toByte)
+  def fromHexDump(dump: String) = dump.grouped(2).toArray.map(chars => Integer.parseInt(new String(chars), 16).toByte)
 
   def haveNoContentEncoding: Matcher[HttpResponse] = be(None) compose { (_: HttpResponse).header[`Content-Encoding`] }
   def haveContentEncoding(encoding: HttpEncoding): Matcher[HttpResponse] =

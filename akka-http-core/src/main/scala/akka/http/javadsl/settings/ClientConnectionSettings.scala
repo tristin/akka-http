@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2017-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.javadsl.settings
@@ -27,7 +27,7 @@ import scala.concurrent.duration.{ Duration, FiniteDuration }
  * Public API but not intended for subclassing
  */
 @DoNotInherit
-abstract class ClientConnectionSettings private[akka] () { self: ClientConnectionSettingsImpl ⇒
+abstract class ClientConnectionSettings private[akka] () { self: ClientConnectionSettingsImpl =>
 
   /* JAVA APIs */
   final def getConnectingTimeout: FiniteDuration = connectingTimeout
@@ -36,6 +36,7 @@ abstract class ClientConnectionSettings private[akka] () { self: ClientConnectio
   final def getSocketOptions: java.lang.Iterable[SocketOption] = socketOptions.asJava
   final def getUserAgentHeader: Optional[UserAgent] = OptionConverters.toJava(userAgentHeader)
   final def getLogUnencryptedNetworkBytes: Optional[Int] = OptionConverters.toJava(logUnencryptedNetworkBytes)
+  final def getStreamCancellationDelay: FiniteDuration = streamCancellationDelay
   final def getRequestHeaderSizeHint: Int = requestHeaderSizeHint
   final def getWebsocketSettings: WebSocketSettings = websocketSettings
   final def getWebsocketRandomFactory: Supplier[Random] = new Supplier[Random] {
@@ -47,12 +48,16 @@ abstract class ClientConnectionSettings private[akka] () { self: ClientConnectio
   @ApiMayChange
   def getTransport: ClientTransport = transport.asJava
 
-  // ---
+  // implemented in Scala variant
+
+  def withConnectingTimeout(newValue: FiniteDuration): ClientConnectionSettings
+  def withIdleTimeout(newValue: Duration): ClientConnectionSettings
+  def withRequestHeaderSizeHint(newValue: Int): ClientConnectionSettings
+  def withStreamCancellationDelay(newValue: FiniteDuration): ClientConnectionSettings
+
+  // Java API versions of mutators
 
   def withUserAgentHeader(newValue: Optional[UserAgent]): ClientConnectionSettings = self.copy(userAgentHeader = newValue.asScala.map(_.asScala))
-  def withConnectingTimeout(newValue: FiniteDuration): ClientConnectionSettings = self.copy(connectingTimeout = newValue)
-  def withIdleTimeout(newValue: Duration): ClientConnectionSettings = self.copy(idleTimeout = newValue)
-  def withRequestHeaderSizeHint(newValue: Int): ClientConnectionSettings = self.copy(requestHeaderSizeHint = newValue)
   def withLogUnencryptedNetworkBytes(newValue: Optional[Int]): ClientConnectionSettings = self.copy(logUnencryptedNetworkBytes = OptionConverters.toScala(newValue))
   def withWebsocketRandomFactory(newValue: java.util.function.Supplier[Random]): ClientConnectionSettings = self.copy(websocketSettings = websocketSettings.withRandomFactoryFactory(new Supplier[Random] {
     override def get(): Random = newValue.get()

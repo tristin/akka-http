@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.util
@@ -10,13 +10,15 @@ import akka.actor.ActorSystem
 import akka.event.Logging
 import akka.event.Logging._
 import akka.testkit.{ EventFilter, TestEventListener }
-import org.scalatest.{ Outcome, SuiteMixin, TestSuite }
+import org.scalatest.{ Failed, Outcome, SuiteMixin, TestSuite }
 
 /**
  * Mixin this trait to a test to make log lines appear only when the test failed.
  */
-trait WithLogCapturing extends SuiteMixin { this: TestSuite ⇒
+trait WithLogCapturing extends SuiteMixin { this: TestSuite =>
   implicit def system: ActorSystem
+
+  def failOnSevereMessages: Boolean = false
 
   abstract override def withFixture(test: NoArgTest): Outcome = {
     // When filtering just collects events into this var (yeah, it's a hack to do that in a filter).
@@ -38,18 +40,36 @@ trait WithLogCapturing extends SuiteMixin { this: TestSuite ⇒
       r
     }
 
-    if (!(res.isSucceeded || res.isPending)) {
+    def flushLog(): Unit = {
       println(s"--> [${Console.BLUE}${test.name}${Console.RESET}] Start of log messages of test that [$res]")
       val logger = new StdOutLogger {}
-      withPrefixedOut("| ") { events.reverse.foreach(logger.print) }
+      withPrefixedOut("| ") {
+        events.reverse.foreach { ev =>
+          if (ev.level == WarningLevel) print(Console.YELLOW)
+          else if (ev.level == ErrorLevel) print(Console.RED)
+          logger.print(ev)
+          if (ev.level <= WarningLevel) print(Console.RESET)
+        }
+      }
       println(s"<-- [${Console.BLUE}${test.name}${Console.RESET}] End of log messages of test that [$res]")
     }
 
-    res
+    if (!(res.isSucceeded || res.isPending)) {
+      flushLog()
+      res
+    } else if (failOnSevereMessages && events.exists(_.level <= Logging.WarningLevel)) {
+      val stats = events.groupBy(_.level).mapValues(_.size).toMap.withDefaultValue(0)
+      flushLog()
+
+      Failed(new AssertionError(
+        s"No severe log messages should be emitted during test run but got [${stats(Logging.WarningLevel)}] warnings and [${stats(Logging.ErrorLevel)}] errors (see marked lines above)"
+      ))
+    } else res
+
   }
 
   /** Adds a prefix to every line printed out during execution of the thunk. */
-  private def withPrefixedOut[T](prefix: String)(thunk: ⇒ T): T = {
+  private def withPrefixedOut[T](prefix: String)(thunk: => T): T = {
     val oldOut = Console.out
     val prefixingOut =
       new PrintStream(new OutputStream {
@@ -72,8 +92,8 @@ trait WithLogCapturing extends SuiteMixin { this: TestSuite ⇒
  */
 class DebugLogSilencingTestEventListener extends TestEventListener {
   override def print(event: Any): Unit = event match {
-    case d: Debug ⇒ // ignore
-    case _        ⇒ super.print(event)
+    case d: Debug => // ignore
+    case _        => super.print(event)
   }
 }
 

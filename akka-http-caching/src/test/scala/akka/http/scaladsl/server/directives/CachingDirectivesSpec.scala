@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2017-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.server.directives
@@ -12,12 +12,13 @@ import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.server.{ ExceptionHandler, RequestContext }
 import akka.http.scaladsl.testkit.ScalatestRouteTest
 import akka.http.scaladsl.model.HttpMethods.GET
-import org.scalatest.{ Matchers, WordSpec }
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
 
-class CachingDirectivesSpec extends WordSpec with Matchers with ScalatestRouteTest with CachingDirectives {
+class CachingDirectivesSpec extends AnyWordSpec with Matchers with ScalatestRouteTest with CachingDirectives {
 
   val simpleKeyer: PartialFunction[RequestContext, Uri] = {
-    case r: RequestContext if r.request.method == GET ⇒ r.request.uri
+    case r: RequestContext if r.request.method == GET => r.request.uri
   }
 
   val countingService = {
@@ -61,17 +62,17 @@ class CachingDirectivesSpec extends WordSpec with Matchers with ScalatestRouteTe
 
     "be transparent to exceptions thrown from its inner route" in {
       case object MyException extends SingletonException
-      implicit val myExceptionHandler = ExceptionHandler {
-        case MyException ⇒ complete("Good")
+      val myExceptionHandler = ExceptionHandler {
+        case MyException => complete("Good")
       }
 
-      Get() ~> cache(routeCache, simpleKeyer) {
-        _ ⇒ throw MyException // thrown directly
-      } ~> check { responseAs[String] shouldEqual "Good" }
+      Get() ~> handleExceptions(myExceptionHandler)(cache(routeCache, simpleKeyer) {
+        _ => throw MyException // thrown directly
+      }) ~> check { responseAs[String] shouldEqual "Good" }
 
-      Get() ~> cache(routeCache, simpleKeyer) {
+      Get() ~> handleExceptions(myExceptionHandler)(cache(routeCache, simpleKeyer) {
         _.fail(MyException) // bubbling up
-      } ~> check { responseAs[String] shouldEqual "Good" }
+      }) ~> check { responseAs[String] shouldEqual "Good" }
     }
   }
 

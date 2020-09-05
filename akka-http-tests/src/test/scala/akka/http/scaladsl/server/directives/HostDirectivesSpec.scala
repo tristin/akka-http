@@ -1,14 +1,14 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.server
 package directives
 
 import akka.http.scaladsl.model.headers.Host
-import org.scalatest.FreeSpec
+import org.scalatest.freespec.AnyFreeSpec
 
-class HostDirectivesSpec extends FreeSpec with GenericRoutingSpec {
+class HostDirectivesSpec extends AnyFreeSpec with GenericRoutingSpec {
   "The 'host' directive" - {
     "in its simple String form should" - {
       "block requests to unmatched hosts" in {

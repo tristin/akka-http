@@ -1,20 +1,25 @@
 /*
- * Copyright (C) 2015-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2015-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.server.directives
 
 import java.io.File
 
+import akka.Done
 import akka.annotation.ApiMayChange
+import akka.http.impl.util.StreamUtils
 import akka.http.scaladsl.server.{ Directive, Directive1, MissingFormFieldRejection }
 import akka.http.scaladsl.model.{ ContentType, Multipart }
 import akka.util.ByteString
 
 import scala.collection.immutable
-import scala.concurrent.Future
+import scala.concurrent.{ Future, Promise }
 import akka.stream.scaladsl._
 import akka.http.javadsl
+import akka.http.scaladsl.server.RouteResult
+
+import scala.util.{ Failure, Success }
 
 /**
  * @groupname fileupload File upload directives
@@ -23,21 +28,8 @@ import akka.http.javadsl
 trait FileUploadDirectives {
 
   import BasicDirectives._
-  import RouteDirectives._
   import FutureDirectives._
   import MarshallingDirectives._
-
-  /**
-   * Streams the bytes of the file submitted using multipart with the given file name into a temporary file on disk.
-   * If there is an error writing to disk the request will be failed with the thrown exception, if there is no such
-   * field the request will be rejected, if there are multiple file parts with the same name, the first one will be
-   * used and the subsequent ones ignored.
-   *
-   * @group fileupload
-   */
-  @deprecated("Deprecated in favor of storeUploadedFile which allows to specify a file to store the upload in.", "10.0.11")
-  def uploadedFile(fieldName: String): Directive1[(FileInfo, File)] =
-    storeUploadedFile(fieldName, _ ⇒ File.createTempFile("akka-http-upload", ".tmp")).tmap(Tuple1(_))
 
   /**
    * Streams the bytes of the file submitted using multipart with the given file name into a designated file on disk.
@@ -48,21 +40,22 @@ trait FileUploadDirectives {
    * @group fileupload
    */
   @ApiMayChange
-  def storeUploadedFile(fieldName: String, destFn: FileInfo ⇒ File): Directive[(FileInfo, File)] =
-    extractRequestContext.flatMap { ctx ⇒
+  def storeUploadedFile(fieldName: String, destFn: FileInfo => File): Directive[(FileInfo, File)] =
+    extractRequestContext.flatMap { ctx =>
       import ctx.executionContext
       import ctx.materializer
 
       fileUpload(fieldName).flatMap {
-        case (fileInfo, bytes) ⇒
+        case (fileInfo, bytes) =>
 
           val dest = destFn(fileInfo)
           val uploadedF: Future[(FileInfo, File)] =
             bytes
               .runWith(FileIO.toPath(dest.toPath))
-              .map(_ ⇒ (fileInfo, dest))
+              .flatMap(StreamUtils.handleIOResult)
+              .map(_ => (fileInfo, dest))
               .recoverWith {
-                case ex ⇒
+                case ex =>
                   dest.delete()
                   throw ex
               }
@@ -79,27 +72,27 @@ trait FileUploadDirectives {
    * @group fileupload
    */
   @ApiMayChange
-  def storeUploadedFiles(fieldName: String, destFn: FileInfo ⇒ File): Directive1[immutable.Seq[(FileInfo, File)]] =
-    entity(as[Multipart.FormData]).flatMap { formData ⇒
-      extractRequestContext.flatMap { ctx ⇒
+  def storeUploadedFiles(fieldName: String, destFn: FileInfo => File): Directive1[immutable.Seq[(FileInfo, File)]] =
+    entity(as[Multipart.FormData]).flatMap { formData =>
+      extractRequestContext.flatMap { ctx =>
         implicit val mat = ctx.materializer
         implicit val ec = ctx.executionContext
 
         val uploaded: Source[(FileInfo, File), Any] = formData.parts
-          .mapConcat { part ⇒
+          .mapConcat { part =>
             if (part.filename.isDefined && part.name == fieldName) part :: Nil
             else {
               part.entity.discardBytes()
               Nil
             }
           }
-          .mapAsync(1) { part ⇒
+          .mapAsync(1) { part =>
             val fileInfo = FileInfo(part.name, part.filename.get, part.entity.contentType)
             val dest = destFn(fileInfo)
 
-            part.entity.dataBytes.runWith(FileIO.toPath(dest.toPath)).map { _ ⇒
-              (fileInfo, dest)
-            }
+            part.entity.dataBytes.runWith(FileIO.toPath(dest.toPath))
+              .flatMap(StreamUtils.handleIOResult)
+              .map(_ => (fileInfo, dest))
           }
 
         val uploadedF = uploaded.runWith(Sink.seq[(FileInfo, File)])
@@ -117,23 +110,46 @@ trait FileUploadDirectives {
    * @group fileupload
    */
   def fileUpload(fieldName: String): Directive1[(FileInfo, Source[ByteString, Any])] =
-    entity(as[Multipart.FormData]).flatMap { formData ⇒
-      extractRequestContext.flatMap { ctx ⇒
-        implicit val mat = ctx.materializer
+    entity(as[Multipart.FormData]).flatMap { formData =>
+      Directive[Tuple1[(FileInfo, Source[ByteString, Any])]] { inner => ctx =>
+        import ctx.materializer
+        import ctx.executionContext
 
-        val onePartSource: Source[(FileInfo, Source[ByteString, Any]), Any] = formData.parts
-          .filter(part ⇒ part.filename.isDefined && part.name == fieldName)
-          .map(part ⇒ (FileInfo(part.name, part.filename.get, part.entity.contentType), part.entity.dataBytes))
-          .take(1)
+        // We complete the directive through this promise as soon as we encounter the
+        // selected part. This way the inner directive can consume it, after which we will
+        // proceed to consume the rest of the request, discarding any follow-up parts.
+        val done = Promise[RouteResult]()
 
-        val onePartF = onePartSource.runWith(Sink.headOption[(FileInfo, Source[ByteString, Any])])
+        // Streamed multipart data must be processed in a certain way, that is, before you can expect the next part you
+        // must have fully read the entity of the current part.
+        // That means, we cannot just do `formData.parts.runWith(Sink.seq)` and then look for the part we are interested in
+        // but instead, we must actively process all the parts, regardless of whether we are interested in the data or not.
+        formData.parts
+          .mapAsync(parallelism = 1) {
+            case part if !done.isCompleted && part.filename.isDefined && part.name == fieldName =>
+              val data = (FileInfo(part.name, part.filename.get, part.entity.contentType), part.entity.dataBytes)
+              inner(Tuple1(data))(ctx).map { result =>
+                done.success(result)
+              }
+            case part =>
+              part.entity.discardBytes().future
+          }
+          .runWith(Sink.ignore)
+          .onComplete {
+            case Success(Done) =>
+              if (done.isCompleted)
+                () // OK
+              else
+                done.success(RouteResult.Rejected(MissingFormFieldRejection(fieldName) :: Nil))
+            case Failure(cause) =>
+              if (done.isCompleted)
+                () // consuming the other parts failed though we already started processing the selected part.
+              else
+                done.failure(cause)
+          }
 
-        onSuccess(onePartF)
+        done.future
       }
-
-    }.flatMap {
-      case Some(tuple) ⇒ provide(tuple)
-      case None        ⇒ reject(MissingFormFieldRejection(fieldName))
     }
 
   /**
@@ -146,7 +162,7 @@ trait FileUploadDirectives {
    */
   @ApiMayChange
   def fileUploadAll(fieldName: String): Directive1[immutable.Seq[(FileInfo, Source[ByteString, Any])]] =
-    extractRequestContext.flatMap { ctx ⇒
+    extractRequestContext.flatMap { ctx =>
       implicit val ec = ctx.executionContext
 
       def tempDest(fileInfo: FileInfo): File = {
@@ -155,12 +171,12 @@ trait FileUploadDirectives {
         dest
       }
 
-      storeUploadedFiles(fieldName, tempDest).map { files ⇒
+      storeUploadedFiles(fieldName, tempDest).map { files =>
         files.map {
-          case (fileInfo, src) ⇒
+          case (fileInfo, src) =>
             val byteSource: Source[ByteString, Any] = FileIO.fromPath(src.toPath)
-              .mapMaterializedValue { f ⇒
-                f.onComplete(_ ⇒ src.delete())
+              .mapMaterializedValue { f =>
+                f.onComplete(_ => src.delete())
               }
 
             (fileInfo, byteSource)

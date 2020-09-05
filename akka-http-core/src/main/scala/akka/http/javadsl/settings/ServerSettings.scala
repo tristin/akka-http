@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2017-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.javadsl.settings
@@ -24,13 +24,20 @@ import scala.concurrent.duration.{ Duration, FiniteDuration }
 /**
  * Public API but not intended for subclassing
  */
-@DoNotInherit abstract class ServerSettings { self: ServerSettingsImpl ⇒
+@DoNotInherit abstract class ServerSettings { self: ServerSettingsImpl =>
   def getServerHeader: Optional[Server]
   def getPreviewServerSettings: PreviewServerSettings
   def getTimeouts: ServerSettings.Timeouts
   def getMaxConnections: Int
   def getPipeliningLimit: Int
+
+  /**
+   * @deprecated since 10.2.0, use remoteAddressAttribute instead
+   */
+  @Deprecated
+  @deprecated("Use remoteAddressAttribute instead", since = "10.2.0")
   def getRemoteAddressHeader: Boolean
+  def getRemoteAddressAttribute: Boolean
   def getRawRequestUriHeader: Boolean
   def getTransparentHeadRequests: Boolean
   def getVerboseErrorMessages: Boolean
@@ -38,6 +45,7 @@ import scala.concurrent.duration.{ Duration, FiniteDuration }
   def getBacklog: Int
   def getSocketOptions: java.lang.Iterable[SocketOption]
   def getDefaultHostHeader: Host
+  @Deprecated @deprecated("Kept for binary compatibility; Use websocketSettings.getRandomFactory instead", since = "10.2.0")
   def getWebsocketRandomFactory: java.util.function.Supplier[Random]
   def getWebsocketSettings: WebSocketSettings
   def getParserSettings: ParserSettings
@@ -46,6 +54,8 @@ import scala.concurrent.duration.{ Duration, FiniteDuration }
   def getDefaultHttpPort: Int
   def getDefaultHttpsPort: Int
   def getTerminationDeadlineExceededResponse: akka.http.javadsl.model.HttpResponse
+  def getParsingErrorHandler: String
+  def getStreamCancellationDelay: FiniteDuration
 
   // ---
 
@@ -55,6 +65,7 @@ import scala.concurrent.duration.{ Duration, FiniteDuration }
   def withMaxConnections(newValue: Int): ServerSettings = self.copy(maxConnections = newValue)
   def withPipeliningLimit(newValue: Int): ServerSettings = self.copy(pipeliningLimit = newValue)
   def withRemoteAddressHeader(newValue: Boolean): ServerSettings = self.copy(remoteAddressHeader = newValue)
+  def withRemoteAddressAttribute(newValue: Boolean): ServerSettings = self.copy(remoteAddressAttribute = newValue)
   def withRawRequestUriHeader(newValue: Boolean): ServerSettings = self.copy(rawRequestUriHeader = newValue)
   def withTransparentHeadRequests(newValue: Boolean): ServerSettings = self.copy(transparentHeadRequests = newValue)
   def withVerboseErrorMessages(newValue: Boolean): ServerSettings = self.copy(verboseErrorMessages = newValue)
@@ -63,6 +74,7 @@ import scala.concurrent.duration.{ Duration, FiniteDuration }
   def withSocketOptions(newValue: java.lang.Iterable[SocketOption]): ServerSettings = self.copy(socketOptions = newValue.asScala.toList)
   def withDefaultHostHeader(newValue: Host): ServerSettings = self.copy(defaultHostHeader = newValue.asScala)
   def withParserSettings(newValue: ParserSettings): ServerSettings = self.copy(parserSettings = newValue.asScala)
+  @Deprecated @deprecated("Kept for binary compatibility; Use websocketSettings.withRandomFactoryFactory instead", since = "10.2.0")
   def withWebsocketRandomFactory(newValue: java.util.function.Supplier[Random]): ServerSettings = self.copy(websocketSettings = websocketSettings.withRandomFactoryFactory(new Supplier[Random] {
     override def get(): Random = newValue.get()
   }))
@@ -73,7 +85,8 @@ import scala.concurrent.duration.{ Duration, FiniteDuration }
   def withDefaultHttpsPort(newValue: Int): ServerSettings = self.copy(defaultHttpPort = newValue)
   def withTerminationDeadlineExceededResponse(response: akka.http.javadsl.model.HttpResponse): ServerSettings =
     self.copy(terminationDeadlineExceededResponse = response.asScala)
-
+  def withParsingErrorHandler(newValue: String): ServerSettings = self.copy(parsingErrorHandler = parsingErrorHandler)
+  def withStreamCancellationDelay(newValue: FiniteDuration): ServerSettings = self.copy(streamCancellationDelay = newValue)
 }
 
 object ServerSettings extends SettingsCompanion[ServerSettings] {

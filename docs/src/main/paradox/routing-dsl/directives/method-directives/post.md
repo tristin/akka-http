@@ -6,7 +6,7 @@ Matches requests with HTTP method `POST`.
 
 ## Signature
 
-@@signature [MethodDirectives.scala]($akka-http$/akka-http/src/main/scala/akka/http/scaladsl/server/directives/MethodDirectives.scala) { #post }
+@@signature [MethodDirectives.scala](/akka-http/src/main/scala/akka/http/scaladsl/server/directives/MethodDirectives.scala) { #post }
 
 @@@
 
@@ -14,7 +14,7 @@ Matches requests with HTTP method `POST`.
 
 This directive filters the incoming request by its HTTP method. Only requests with
 method `POST` are passed on to the inner route. All others are rejected with a
-@unidoc[MethodRejection], which is translated into a `405 Method Not Allowed` response
+@apidoc[MethodRejection], which is translated into a `405 Method Not Allowed` response
 by the default @ref[RejectionHandler](../../rejections.md#the-rejectionhandler).
 
 ## Example

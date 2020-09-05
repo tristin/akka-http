@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.engine.parsing
@@ -12,7 +12,7 @@ import com.typesafe.config.{ Config, ConfigFactory }
 
 import scala.concurrent.{ Await, Future }
 import scala.concurrent.duration._
-import org.scalatest.{ BeforeAndAfterAll, FreeSpec, Matchers }
+import org.scalatest.BeforeAndAfterAll
 import org.scalatest.matchers.Matcher
 import akka.util.ByteString
 import akka.actor.ActorSystem
@@ -31,8 +31,10 @@ import ParserOutput._
 import akka.http.scaladsl.model.MediaType.WithOpenCharset
 import akka.stream.stage.{ GraphStage, GraphStageLogic, InHandler, OutHandler }
 import akka.testkit._
+import org.scalatest.freespec.AnyFreeSpec
+import org.scalatest.matchers.should.Matchers
 
-abstract class ResponseParserSpec(mode: String, newLine: String) extends FreeSpec with Matchers with BeforeAndAfterAll {
+abstract class ResponseParserSpec(mode: String, newLine: String) extends AnyFreeSpec with Matchers with BeforeAndAfterAll {
   val testConf: Config = ConfigFactory.parseString("""
     akka.event-handlers = ["akka.testkit.TestEventListener"]
     akka.loglevel = WARNING
@@ -42,6 +44,7 @@ abstract class ResponseParserSpec(mode: String, newLine: String) extends FreeSpe
 
   implicit val materializer = ActorMaterializer()
   val ServerOnTheMove = StatusCodes.custom(331, "Server on the move")
+  val TotallyUnrecognized = StatusCodes.custom(456, "Totally unrecognized")
 
   s"The response parsing logic should (mode: $mode)" - {
     "properly parse" - {
@@ -74,7 +77,7 @@ abstract class ResponseParserSpec(mode: String, newLine: String) extends FreeSpe
         closeAfterResponseCompletion shouldEqual Seq(false)
       }
 
-      "a response with a custom status code" in new Test {
+      "a response with a registered custom status code" in new Test {
         override def parserSettings: ParserSettings =
           super.parserSettings.withCustomStatusCodes(ServerOnTheMove)
 
@@ -82,6 +85,17 @@ abstract class ResponseParserSpec(mode: String, newLine: String) extends FreeSpe
           |Content-Length: 0
           |
           |""" should parseTo(HttpResponse(ServerOnTheMove))
+        closeAfterResponseCompletion shouldEqual Seq(false)
+      }
+
+      "a response with an unrecognized status code" in new Test {
+        // A client must understand the class of any status code, as indicated by the first digit, and
+        // treat an unrecognized status code as being equivalent to the x00 status code of that class
+        // https://tools.ietf.org/html/rfc7231#section-6
+        """HTTP/1.1 456 Totally unrecognized
+          |Content-Length: 0
+          |
+          |""" should parseTo(HttpResponse(TotallyUnrecognized))
         closeAfterResponseCompletion shouldEqual Seq(false)
       }
 
@@ -114,6 +128,15 @@ abstract class ResponseParserSpec(mode: String, newLine: String) extends FreeSpe
           |Host: api.example.com
           |
           |Foobs""" should parseTo(HttpResponse(NotFound, List(Host("api.example.com")), "Foobs".getBytes, `HTTP/1.0`))
+        closeAfterResponseCompletion shouldEqual Seq(true)
+      }
+
+      "a response with duplicate host headers" in new Test {
+        """HTTP/1.0 404 Not Found
+          |Host: api.example.com
+          |Host: akka.io
+          |
+          |Foobs""" should parseTo(HttpResponse(NotFound, List(Host("api.example.com"), Host("akka.io")), "Foobs".getBytes, `HTTP/1.0`))
         closeAfterResponseCompletion shouldEqual Seq(true)
       }
 
@@ -228,7 +251,7 @@ abstract class ResponseParserSpec(mode: String, newLine: String) extends FreeSpe
           Right(HttpResponse(
             headers = List(`Transfer-Encoding`(TransferEncodings.Extension("fancy"))),
             entity = HttpEntity.Chunked(`application/pdf`, source()))),
-          Left(EntityStreamError(ErrorInfo("Entity stream truncation"))))
+          Left(EntityStreamError(ErrorInfo("Entity stream truncation. The HTTP parser was receiving an entity when the underlying connection was closed unexpectedly."))))
         closeAfterResponseCompletion shouldEqual Seq(false)
       }
 
@@ -278,9 +301,9 @@ abstract class ResponseParserSpec(mode: String, newLine: String) extends FreeSpe
 
     class StrictEqualHttpResponse(val resp: HttpResponse) {
       override def equals(other: scala.Any): Boolean = other match {
-        case other: StrictEqualHttpResponse ⇒
+        case other: StrictEqualHttpResponse =>
 
-          this.resp.copy(entity = HttpEntity.Empty) == other.resp.copy(entity = HttpEntity.Empty) &&
+          this.resp.withEntity(HttpEntity.Empty) == other.resp.withEntity(HttpEntity.Empty) &&
             Await.result(this.resp.entity.toStrict(awaitAtMost), awaitAtMost) ==
             Await.result(other.resp.entity.toStrict(awaitAtMost), awaitAtMost)
       }
@@ -312,27 +335,27 @@ abstract class ResponseParserSpec(mode: String, newLine: String) extends FreeSpe
       generalRawMultiParseTo(GET, expected: _*)
     def generalRawMultiParseTo(requestMethod: HttpMethod, expected: Either[ResponseOutput, HttpResponse]*): Matcher[Seq[String]] =
       equal(expected.map(strictEqualify))
-        .matcher[Seq[Either[ResponseOutput, StrictEqualHttpResponse]]] compose { input: Seq[String] ⇒
+        .matcher[Seq[Either[ResponseOutput, StrictEqualHttpResponse]]] compose { input: Seq[String] =>
           collectBlocking {
             rawParse(requestMethod, input: _*)
               .mapAsync(1) {
-                case Right(response) ⇒ compactEntity(response.entity).fast.map(x ⇒ Right(response.withEntity(x)))
-                case Left(error)     ⇒ FastFuture.successful(Left(error))
+                case Right(response) => compactEntity(response.entity).fast.map(x => Right(response.withEntity(x)))
+                case Left(error)     => FastFuture.successful(Left(error))
               }
           }.map(strictEqualify)
         }
 
     def rawParse(requestMethod: HttpMethod, input: String*): Source[Either[ResponseOutput, HttpResponse], NotUsed] =
       Source(input.toList)
-        .map(bytes ⇒ SessionBytes(TLSPlacebo.dummySession, ByteString(bytes)))
+        .map(bytes => SessionBytes(TLSPlacebo.dummySession, ByteString(bytes)))
         .via(newParserStage(requestMethod)).named("parser")
-        .splitWhen(x ⇒ x.isInstanceOf[MessageStart] || x.isInstanceOf[EntityStreamError])
+        .splitWhen(x => x.isInstanceOf[MessageStart] || x.isInstanceOf[EntityStreamError])
         .prefixAndTail(1)
         .collect {
-          case (Seq(ResponseStart(statusCode, protocol, headers, createEntity, close)), entityParts) ⇒
+          case (Seq(ResponseStart(statusCode, protocol, headers, createEntity, close)), entityParts) =>
             closeAfterResponseCompletion :+= close
             Right(HttpResponse(statusCode, headers, createEntity(entityParts), protocol))
-          case (Seq(x @ (MessageStartError(_, _) | EntityStreamError(_))), tail) ⇒
+          case (Seq(x @ (MessageStartError(_, _) | EntityStreamError(_))), tail) =>
             tail.runWith(Sink.ignore)
             Left(x)
         }.concatSubstreams
@@ -363,9 +386,9 @@ abstract class ResponseParserSpec(mode: String, newLine: String) extends FreeSpe
 
             private def handleParserOutput(output: ResponseOutput): Unit = {
               output match {
-                case StreamEnd    ⇒ completeStage()
-                case NeedMoreData ⇒ pull(in)
-                case x            ⇒ push(out, x)
+                case StreamEnd    => completeStage()
+                case NeedMoreData => pull(in)
+                case x            => push(out, x)
               }
             }
 
@@ -377,14 +400,14 @@ abstract class ResponseParserSpec(mode: String, newLine: String) extends FreeSpe
 
     private def compactEntity(entity: ResponseEntity): Future[ResponseEntity] =
       entity match {
-        case x: HttpEntity.Chunked ⇒ compactEntityChunks(x.chunks).fast.map(compacted ⇒ x.copy(chunks = compacted))
-        case _                     ⇒ entity.toStrict(awaitAtMost)
+        case x: HttpEntity.Chunked => compactEntityChunks(x.chunks).fast.map(compacted => x.copy(chunks = compacted))
+        case _                     => entity.toStrict(awaitAtMost)
       }
 
     private def compactEntityChunks(data: Source[ChunkStreamPart, Any]): Future[Source[ChunkStreamPart, Any]] =
       data.limit(100000).runWith(Sink.seq)
         .fast.map(source(_: _*))
-        .fast.recover { case _: NoSuchElementException ⇒ source() }
+        .fast.recover { case _: NoSuchElementException => source() }
 
     def prep(response: String) = response.stripMarginWithNewline(newLine)
 

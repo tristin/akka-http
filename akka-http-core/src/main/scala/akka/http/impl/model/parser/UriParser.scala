@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.model.parser
@@ -7,8 +7,8 @@ package akka.http.impl.model.parser
 import java.nio.charset.Charset
 
 import akka.parboiled2._
-import akka.http.impl.util.enhanceString_
-import akka.http.scaladsl.model.Uri
+import akka.http.impl.util.{ StringRendering, enhanceString_ }
+import akka.http.scaladsl.model.{ Uri, UriRendering }
 import akka.http.scaladsl.model.headers.HttpOrigin
 import Parser.DeliveryScheme.Either
 import Uri._
@@ -21,12 +21,14 @@ import akka.annotation.InternalApi
  */
 @InternalApi
 private[http] final class UriParser(
-  val input:             ParserInput,
-  val uriParsingCharset: Charset,
-  val uriParsingMode:    Uri.ParsingMode,
-  val maxValueStackSize: Int) extends Parser(maxValueStackSize)
+  private[this] var _input: ParserInput,
+  val uriParsingCharset:    Charset,
+  val uriParsingMode:       Uri.ParsingMode,
+  val maxValueStackSize:    Int) extends Parser(maxValueStackSize)
   with IpAddressParsing with StringBuilding {
   import CharacterClasses._
+
+  override def input: ParserInput = _input
 
   def this(
     input:             ParserInput,
@@ -36,44 +38,68 @@ private[http] final class UriParser(
 
   def parseAbsoluteUri(): Uri =
     rule(`absolute-URI` ~ EOI).run() match {
-      case Right(_)    ⇒ create(_scheme, _userinfo, _host, _port, collapseDotSegments(_path), _rawQueryString, _fragment)
-      case Left(error) ⇒ fail(error, "absolute URI")
+      case Right(_)    => createUnsafe(_scheme, Authority(_host, _port, _userinfo), collapseDotSegments(_path), _rawQueryString, _fragment)
+      case Left(error) => fail(error, "absolute URI")
     }
 
   def parseUriReference(): Uri =
     rule(`URI-reference` ~ EOI).run() match {
-      case Right(_)    ⇒ createUriReference()
-      case Left(error) ⇒ fail(error, "URI reference")
+      case Right(_)    => createUriReference()
+      case Left(error) => fail(error, "URI reference")
     }
 
   def parseAndResolveUriReference(base: Uri): Uri =
     rule(`URI-reference` ~ EOI).run() match {
-      case Right(_)    ⇒ resolve(_scheme, _userinfo, _host, _port, _path, _rawQueryString, _fragment, base)
-      case Left(error) ⇒ fail(error, "URI reference")
+      case Right(_)    => resolveUnsafe(_scheme, _userinfo, _host, _port, _path, _rawQueryString, _fragment, base)
+      case Left(error) => fail(error, "URI reference")
     }
 
   def parseOrigin(): HttpOrigin =
     rule(origin ~ EOI).run() match {
-      case Right(_)    ⇒ HttpOrigin(_scheme, akka.http.scaladsl.model.headers.Host(_host.address, _port))
-      case Left(error) ⇒ fail(error, "origin")
+      case Right(_)    => HttpOrigin(_scheme, akka.http.scaladsl.model.headers.Host(_host.address, _port))
+      case Left(error) => fail(error, "origin")
     }
 
   def parseHost(): Host =
     rule(relaxedHost ~ EOI).run() match {
-      case Right(_)    ⇒ _host
-      case Left(error) ⇒ fail(error, "URI host")
+      case Right(_)    => _host
+      case Left(error) => fail(error, "URI host")
     }
+
+  /**
+   * @return a 'raw' (percent-encoded) query string that does not contain invalid characters.
+   */
+  def parseRawQueryString(): String = {
+    rule(rawQueryString ~ EOI).run() match {
+      case Right(())   => parseSafeRawQueryString(sb.toString)
+      case Left(error) => fail(error, "rawQueryString")
+    }
+  }
+
+  /**
+   * @param rawQueryString 'raw' (percent-encoded) query string that in Relaxed mode may contain characters not allowed
+   * by https://tools.ietf.org/html/rfc3986#section-3.4 but is guaranteed not to have invalid percent-encoded characters
+   * @return a 'raw' (percent-encoded) query string that does not contain invalid characters.
+   */
+  def parseSafeRawQueryString(rawQueryString: String): String = uriParsingMode match {
+    case Uri.ParsingMode.Strict =>
+      // Cannot contain invalid characters in strict mode
+      rawQueryString
+    case Uri.ParsingMode.Relaxed =>
+      // Percent-encode invalid characters
+      UriRendering.encode(new StringRendering, rawQueryString, uriParsingCharset, `query-fragment-char` ++ '%', false).get
+  }
 
   def parseQuery(): Query =
     rule(query ~ EOI).run() match {
-      case Right(query) ⇒ query
-      case Left(error)  ⇒ fail(error, "query")
+      case Right(query) => query
+      case Left(error)  => fail(error, "query")
     }
 
   def parseAuthority(): Authority =
     rule(authority ~ EOI).run() match {
-      case Right(_)    ⇒ Authority(_host, _port, _userinfo)
-      case Left(error) ⇒ fail(error, "authority")
+      case Right(_)    => Authority(_host, _port, _userinfo)
+      case Left(error) => fail(error, "authority")
     }
 
   def fail(error: ParseError, target: String): Nothing = {
@@ -82,36 +108,58 @@ private[http] final class UriParser(
   }
 
   private[this] val `path-segment-char` = uriParsingMode match {
-    case Uri.ParsingMode.Strict ⇒ `pchar-base`
-    case _                      ⇒ `relaxed-path-segment-char`
+    case Uri.ParsingMode.Strict => `pchar-base`
+    case _                      => `relaxed-path-segment-char`
+  }
+  private[this] val `query-char` = uriParsingMode match {
+    case Uri.ParsingMode.Strict => `query-fragment-char`
+    case _                      => `relaxed-query-char`
   }
   private[this] val `query-key-char` = uriParsingMode match {
-    case Uri.ParsingMode.Strict  ⇒ `strict-query-key-char`
-    case Uri.ParsingMode.Relaxed ⇒ `relaxed-query-key-char`
+    case Uri.ParsingMode.Strict  => `strict-query-key-char`
+    case Uri.ParsingMode.Relaxed => `relaxed-query-key-char`
   }
   private[this] val `query-value-char` = uriParsingMode match {
-    case Uri.ParsingMode.Strict  ⇒ `strict-query-value-char`
-    case Uri.ParsingMode.Relaxed ⇒ `relaxed-query-value-char`
+    case Uri.ParsingMode.Strict  => `strict-query-value-char`
+    case Uri.ParsingMode.Relaxed => `relaxed-query-value-char`
   }
   private[this] val `fragment-char` = uriParsingMode match {
-    case Uri.ParsingMode.Strict ⇒ `query-fragment-char`
-    case _                      ⇒ `relaxed-fragment-char`
+    case Uri.ParsingMode.Strict => `query-fragment-char`
+    case _                      => `relaxed-fragment-char`
   }
 
+  // New vars need to be reset in `reset` below
   private[this] var _scheme = ""
   private[this] var _userinfo = ""
   private[this] var _host: Host = Host.Empty
   private[this] var _port: Int = 0
   private[this] var _path: Path = Path.Empty
+  /**
+   *  Percent-encoded. When in in 'relaxed' mode, characters not permitted by https://tools.ietf.org/html/rfc3986#section-3.4
+   *  are already automatically percent-encoded here
+   */
   private[this] var _rawQueryString: Option[String] = None
   private[this] var _fragment: Option[String] = None
+
+  /** Allows to reuse this parser. */
+  def reset(newInput: ParserInput): Unit = {
+    _input = newInput
+    _scheme = ""
+    _userinfo = ""
+    _host = Host.Empty
+    _port = 0
+    _path = Path.Empty
+    _rawQueryString = None
+    _fragment = None
+    _firstPercentIx = -1
+  }
 
   private[this] def setScheme(scheme: String): Unit = _scheme = scheme
   private[this] def setUserInfo(userinfo: String): Unit = _userinfo = userinfo
   private[this] def setHost(host: Host): Unit = _host = host
   private[this] def setPort(port: Int): Unit = _port = port
   private[this] def setPath(path: Path): Unit = _path = path
-  private[this] def setRawQueryString(rawQueryString: String): Unit = _rawQueryString = Some(rawQueryString)
+  private[this] def setRawQueryString(rawQueryString: String): Unit = _rawQueryString = Some(parseSafeRawQueryString(rawQueryString))
   private[this] def setFragment(fragment: String): Unit = _fragment = Some(fragment)
 
   // http://tools.ietf.org/html/rfc3986#appendix-A
@@ -171,8 +219,8 @@ private[http] final class UriParser(
 
   def `IP-literal` = rule { '[' ~ ipv6Host ~ ']' } // IPvFuture not currently recognized
 
-  def ipv4Host = rule { capture(`ip-v4-address`) ~ &(colonSlashEOI) ~> ((b, a) ⇒ _host = IPv4Host(b, a)) }
-  def ipv6Host = rule { capture(`ip-v6-address`) ~> ((b, a) ⇒ setHost(IPv6Host(b, a))) }
+  def ipv4Host = rule { capture(`ip-v4-address`) ~ &(colonSlashEOI) ~> ((b, a) => _host = IPv4Host(b, a)) }
+  def ipv6Host = rule { capture(`ip-v6-address`) ~> ((b, a) => setHost(IPv6Host(b, a))) }
 
   def `reg-name` = rule(
     clearSBForDecoding() ~ oneOrMore(`lower-reg-name-char` ~ appendSB() | UPPER_ALPHA ~ appendLowered() | `pct-encoded`) ~
@@ -194,10 +242,10 @@ private[http] final class UriParser(
   def pchar = rule { `path-segment-char` ~ appendSB() | `pct-encoded` }
 
   def rawQueryString = rule {
-    clearSB() ~ oneOrMore(`raw-query-char` ~ appendSB()) ~ run(setRawQueryString(sb.toString)) | run(setRawQueryString(""))
+    clearSB() ~ oneOrMore(`query-char` ~ appendSB() | `pct-encoded`) ~ run(setRawQueryString(sb.toString)) | run(setRawQueryString(""))
   }
 
-  // http://www.w3.org/TR/html401/interact/forms.html#h-17.13.4.1
+  // https://www.w3.org/TR/html401/interact/forms.html#h-17.13.4.1
   def query: Rule1[Query] = {
     def part(`query-char`: CharPredicate) =
       rule(clearSBForDecoding() ~
@@ -210,8 +258,8 @@ private[http] final class UriParser(
 
     // has a max value-stack depth of 3
     def keyValuePairsWithLimitedStackUse: Rule1[Query] = rule {
-      keyValuePair ~> { (key, value) ⇒ Query.Cons(key, value, Query.Empty) } ~ {
-        zeroOrMore('&' ~ keyValuePair ~> { (prefix: Query, key, value) ⇒ Query.Cons(key, value, prefix) }) ~>
+      keyValuePair ~> { (key, value) => Query.Cons(key, value, Query.Empty) } ~ {
+        zeroOrMore('&' ~ keyValuePair ~> { (prefix: Query, key, value) => Query.Cons(key, value, prefix) }) ~>
           (_.reverse)
       }
     }
@@ -220,7 +268,7 @@ private[http] final class UriParser(
     // without having to reverse it at the end.
     // Adds 2 values to the value stack for the first pair, then parses the remaining pairs.
     def keyValuePairsWithReversalAvoidance: Rule1[Query] = rule {
-      keyValuePair ~ ('&' ~ keyValuePairs | push(Query.Empty)) ~> { (key, value, tail) ⇒
+      keyValuePair ~ ('&' ~ keyValuePairs | push(Query.Empty)) ~> { (key, value, tail) =>
         Query.Cons(key, value, tail)
       }
     }
@@ -231,7 +279,7 @@ private[http] final class UriParser(
       if (valueStack.size + 5 <= maxValueStackSize) keyValuePairsWithReversalAvoidance
       else keyValuePairsWithLimitedStackUse
 
-    rule { keyValuePairs }
+    rule { (EOI ~ push(Query.Empty)) | keyValuePairs }
   }
 
   def fragment = rule(
@@ -240,7 +288,7 @@ private[http] final class UriParser(
 
   def `pct-encoded` = rule {
     '%' ~ HEXDIG ~ HEXDIG ~ run {
-      if (firstPercentIx == -1) firstPercentIx = sb.length()
+      if (_firstPercentIx == -1) _firstPercentIx = sb.length()
       sb.append('%').append(charAt(-2)).append(lastChar)
     }
   }
@@ -260,10 +308,10 @@ private[http] final class UriParser(
 
   def parseHttpRequestTarget(): Uri =
     rule(`request-target` ~ EOI).run() match {
-      case Right(_) ⇒
+      case Right(_) =>
         val path = if (_scheme.isEmpty) _path else collapseDotSegments(_path)
-        create(_scheme, _userinfo, _host, _port, path, _rawQueryString, _fragment)
-      case Left(error) ⇒ fail(error, "request-target")
+        createUnsafe(_scheme, Authority(_host, _port, _userinfo), path, _rawQueryString, _fragment)
+      case Left(error) => fail(error, "request-target")
     }
 
   /////////////////////////// ADDITIONAL HTTP/2-SPECIFIC RULES /////////////////////////
@@ -274,8 +322,8 @@ private[http] final class UriParser(
 
   def parseHttp2AuthorityPseudoHeader(): Uri.Authority =
     rule(`http2-authority-pseudo-header` ~ EOI).run() match {
-      case Right(_)    ⇒ Authority(_host, _port)
-      case Left(error) ⇒ fail(error, "http2-authority-pseudo-header")
+      case Right(_)    => Authority(_host, _port)
+      case Left(error) => fail(error, "http2-authority-pseudo-header")
     }
 
   // https://tools.ietf.org/html/rfc7540#section-8.1.2.3
@@ -283,12 +331,16 @@ private[http] final class UriParser(
     `absolute-path` ~ optional('?' ~ rawQueryString) // origin-form
   ) // TODO: asterisk-form
 
+  /**
+   * @return path and percent-encoded query string. When in in 'relaxed' mode, characters not permitted by https://tools.ietf.org/html/rfc3986#section-3.4
+   *         are already automatically percent-encoded here
+   */
   def parseHttp2PathPseudoHeader(): (Uri.Path, Option[String]) =
     rule(`http2-path-pseudo-header` ~ EOI).run() match {
-      case Right(_) ⇒
+      case Right(_) =>
         val path = collapseDotSegments(_path)
         (path, _rawQueryString)
-      case Left(error) ⇒ fail(error, "http2-path-pseudo-header")
+      case Left(error) => fail(error, "http2-path-pseudo-header")
     }
 
   ///////////// helpers /////////////
@@ -297,19 +349,18 @@ private[http] final class UriParser(
 
   private def savePath() = rule { run(setPath(Path(sb.toString, uriParsingCharset))) }
 
-  private[this] var firstPercentIx = -1
+  private[this] var _firstPercentIx = -1
 
-  private def clearSBForDecoding(): Rule0 = rule { run { sb.setLength(0); firstPercentIx = -1 } }
+  private def clearSBForDecoding(): Rule0 = rule { run { sb.setLength(0); _firstPercentIx = -1 } }
 
   private def getDecodedString(charset: Charset = uriParsingCharset) =
-    if (firstPercentIx >= 0) decode(sb.toString, charset, firstPercentIx)() else sb.toString
+    if (_firstPercentIx >= 0) decode(sb.toString, charset, _firstPercentIx)() else sb.toString
 
   private def getDecodedStringAndLowerIfEncoded(charset: Charset) =
-    if (firstPercentIx >= 0) decode(sb.toString, charset, firstPercentIx)().toRootLowerCase else sb.toString
+    if (_firstPercentIx >= 0) decode(sb.toString, charset, _firstPercentIx)().toRootLowerCase else sb.toString
 
   private def createUriReference(): Uri = {
     val path = if (_scheme.isEmpty) _path else collapseDotSegments(_path)
-    create(_scheme, _userinfo, _host, normalizePort(_port, _scheme), path, _rawQueryString, _fragment)
+    createUnsafe(_scheme, Authority(_host, normalizePort(_port, _scheme), _userinfo), path, _rawQueryString, _fragment)
   }
 }
-

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.macros
@@ -20,7 +20,7 @@ private[akka] trait LogHelper {
   def log: LoggingAdapter
 
   /** Override to prefix every log message with a user-defined context string */
-  protected def prefixString: String = ""
+  def prefixString: String = ""
 
   def debug(msg: String): Unit = macro LogHelper.debugMacro
   def info(msg: String): Unit = macro LogHelper.infoMacro

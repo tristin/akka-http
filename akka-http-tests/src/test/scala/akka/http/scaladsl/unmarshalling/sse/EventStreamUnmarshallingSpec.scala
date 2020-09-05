@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http
@@ -12,15 +12,16 @@ import akka.http.scaladsl.model.HttpEntity
 import akka.http.scaladsl.model.MediaTypes.`text/event-stream`
 import akka.http.scaladsl.model.sse.ServerSentEvent
 import akka.stream.scaladsl.{ Sink, Source }
-import java.util.{ List ⇒ JList }
-import org.scalatest.{ AsyncWordSpec, Matchers }
+import java.util.{ List => JList }
 import scala.collection.JavaConverters
 import scala.collection.immutable.Seq
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AsyncWordSpec
 
 object EventStreamUnmarshallingSpec {
 
   val events: Seq[ServerSentEvent] =
-    1.to(666).map(n ⇒ ServerSentEvent(n.toString))
+    1.to(666).map(n => ServerSentEvent(n.toString))
 
   // Also used by EventStreamUnmarshallingTest.java
   val eventsAsJava: JList[javadsl.model.sse.ServerSentEvent] = {

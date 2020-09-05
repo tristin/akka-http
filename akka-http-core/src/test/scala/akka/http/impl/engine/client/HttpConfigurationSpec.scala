@@ -1,11 +1,11 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.engine.client
 
 import akka.actor.ActorSystem
-import akka.http.scaladsl.settings.{ ClientConnectionSettings, ConnectionPoolSettings, HttpsProxySettings, ServerSettings }
+import akka.http.scaladsl.settings.{ ClientConnectionSettings, ConnectionPoolSettings, HttpsProxySettings, ParserSettings, ServerSettings }
 import akka.testkit.AkkaSpec
 import com.typesafe.config.ConfigFactory
 
@@ -15,11 +15,13 @@ class HttpConfigurationSpec extends AkkaSpec {
   val Off = false
 
   "Reference configurations" should {
-    "have default client and server `parsing` settings" in {
-      ServerSettings(system).parserSettings.toString should ===(ClientConnectionSettings(system).parserSettings.toString)
+    "have default server `parsing` settings" in {
+      // max-content-length defined specially for server
+      ServerSettings(system).parserSettings.toString shouldEqual ParserSettings(system).withMaxContentLength(8 * 1024 * 1024).toString
     }
-    "have default client and pool `parsing` settings" in {
-      ServerSettings(system).parserSettings.toString should ===(ConnectionPoolSettings(system).connectionSettings.parserSettings.toString)
+    "have default client `parsing` settings" in {
+      // max-content-length defined specially for client
+      ClientConnectionSettings(system).parserSettings.toString shouldEqual ParserSettings(system).withMaxContentLength(Long.MaxValue).toString
     }
     "have default client and pool `client` settings" in {
       ClientConnectionSettings(system).toString should ===(ConnectionPoolSettings(system).connectionSettings.toString)
@@ -31,7 +33,7 @@ class HttpConfigurationSpec extends AkkaSpec {
     }
 
     "override value from `akka.http.parsing` by setting `akka.http.client.parsing`" in {
-      configuredSystem("""akka.http.client.parsing.illegal-header-warnings = off""") { sys ⇒
+      configuredSystem("""akka.http.client.parsing.illegal-header-warnings = off""") { sys =>
         val client = ClientConnectionSettings(sys)
         client.parserSettings.illegalHeaderWarnings should ===(Off)
 
@@ -44,7 +46,7 @@ class HttpConfigurationSpec extends AkkaSpec {
     }
 
     "override `akka.http.parsing` by setting `akka.http.host-connection-pool.client.parsing` setting" in {
-      configuredSystem("""akka.http.host-connection-pool.client.parsing.illegal-header-warnings = off""") { sys ⇒
+      configuredSystem("""akka.http.host-connection-pool.client.parsing.illegal-header-warnings = off""") { sys =>
         val client = ClientConnectionSettings(sys)
         client.parserSettings.illegalHeaderWarnings should ===(On)
 
@@ -57,7 +59,7 @@ class HttpConfigurationSpec extends AkkaSpec {
     }
 
     "set `akka.http.host-connection-pool.client.idle-timeout` only" in {
-      configuredSystem("""akka.http.host-connection-pool.client.idle-timeout = 1337s""") { sys ⇒
+      configuredSystem("""akka.http.host-connection-pool.client.idle-timeout = 1337s""") { sys =>
         import scala.concurrent.duration._
 
         val client = ClientConnectionSettings(sys)
@@ -71,7 +73,7 @@ class HttpConfigurationSpec extends AkkaSpec {
       }
     }
     "set `akka.http.server.idle-timeout` only" in {
-      configuredSystem("""akka.http.server.idle-timeout = 1337s""") { sys ⇒
+      configuredSystem("""akka.http.server.idle-timeout = 1337s""") { sys =>
         import scala.concurrent.duration._
 
         val client = ClientConnectionSettings(sys)
@@ -86,7 +88,7 @@ class HttpConfigurationSpec extends AkkaSpec {
     }
 
     "change parser settings for all by setting `akka.http.parsing`" in {
-      configuredSystem("""akka.http.parsing.illegal-header-warnings = off""") { sys ⇒
+      configuredSystem("""akka.http.parsing.illegal-header-warnings = off""") { sys =>
         val client = ClientConnectionSettings(sys)
         client.parserSettings.illegalHeaderWarnings should ===(Off)
 
@@ -104,7 +106,7 @@ class HttpConfigurationSpec extends AkkaSpec {
           parsing.illegal-header-warnings = off
           server.parsing.illegal-header-warnings = on
           client.parsing.illegal-header-warnings = on // also affects host-connection-pool.client
-        }""") { sys ⇒
+        }""") { sys =>
         val client = ClientConnectionSettings(sys)
         client.parserSettings.illegalHeaderWarnings should ===(On)
 
@@ -123,7 +125,7 @@ class HttpConfigurationSpec extends AkkaSpec {
           server.parsing.illegal-header-warnings = on
           client.parsing.illegal-header-warnings = on
           host-connection-pool.client.parsing.illegal-header-warnings = off
-        }""") { sys ⇒
+        }""") { sys =>
         val client = ClientConnectionSettings(sys)
         client.parserSettings.illegalHeaderWarnings should ===(On)
 
@@ -140,14 +142,14 @@ class HttpConfigurationSpec extends AkkaSpec {
         """
           akka.http.host-connection-pool.min-connections = 42
           akka.http.host-connection-pool.max-connections = 43
-        """.stripMargin) { sys ⇒
+        """.stripMargin) { sys =>
 
           val pool = ConnectionPoolSettings(sys)
           pool.getMinConnections should ===(42)
           pool.getMaxConnections should ===(43)
         }
 
-      configuredSystem(""" """) { sys ⇒
+      configuredSystem(""" """) { sys =>
 
         val pool = ConnectionPoolSettings(sys)
         pool.minConnections should ===(0)
@@ -157,7 +159,7 @@ class HttpConfigurationSpec extends AkkaSpec {
         """
           akka.http.host-connection-pool.min-connections = 101
           akka.http.host-connection-pool.max-connections = 1
-        """.stripMargin) { sys ⇒
+        """.stripMargin) { sys =>
 
           intercept[IllegalArgumentException] { ConnectionPoolSettings(sys) }
         }
@@ -167,7 +169,7 @@ class HttpConfigurationSpec extends AkkaSpec {
       configuredSystem(
         """
           akka.http.client.proxy.https.host = ""
-        """) { sys ⇒
+        """) { sys =>
           assertThrows[IllegalArgumentException] {
             HttpsProxySettings(sys)
           }
@@ -178,7 +180,7 @@ class HttpConfigurationSpec extends AkkaSpec {
       configuredSystem(
         """
           akka.http.client.proxy.https.port = 8080
-        """) { sys ⇒
+        """) { sys =>
           assertThrows[IllegalArgumentException] {
             HttpsProxySettings(sys)
           }
@@ -190,7 +192,7 @@ class HttpConfigurationSpec extends AkkaSpec {
         """
           akka.http.client.proxy.https.host = localhost
           akka.http.client.proxy.https.port = 8080
-        """.stripMargin) { sys ⇒
+        """.stripMargin) { sys =>
           val settings = HttpsProxySettings(sys)
           settings.host should ===("localhost")
           settings.port should ===(8080)
@@ -198,7 +200,7 @@ class HttpConfigurationSpec extends AkkaSpec {
     }
   }
 
-  def configuredSystem(overrides: String)(block: ActorSystem ⇒ Unit) = {
+  def configuredSystem(overrides: String)(block: ActorSystem => Unit) = {
     val config = ConfigFactory.parseString(overrides).withFallback(ConfigFactory.load())
     // we go via ActorSystem in order to hit the settings caching infrastructure
     val sys = ActorSystem("config-testing", config)

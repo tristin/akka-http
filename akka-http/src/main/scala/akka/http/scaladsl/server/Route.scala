@@ -1,16 +1,17 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.server
 
 import akka.NotUsed
+import akka.actor.ClassicActorSystemProvider
 import akka.http.scaladsl.model.{ HttpRequest, HttpResponse }
 import akka.http.scaladsl.server.directives.BasicDirectives
 import akka.http.scaladsl.settings.{ ParserSettings, RoutingSettings }
 import akka.http.scaladsl.util.FastFuture._
 import akka.stream.scaladsl.Flow
-import akka.stream.{ ActorMaterializerHelper, Materializer }
+import akka.stream.{ ActorMaterializerHelper, Materializer, SystemMaterializer }
 
 import scala.concurrent.{ ExecutionContextExecutor, Future }
 
@@ -34,18 +35,18 @@ object Route {
    */
   def seal(route: Route)(implicit
     routingSettings: RoutingSettings = null,
-                         parserSettings:   ParserSettings   = null,
-                         rejectionHandler: RejectionHandler = RejectionHandler.default,
-                         exceptionHandler: ExceptionHandler = null): Route = {
+                         @deprecated("For binary compatibility. parserSettings is never used", since = "10.1.8") parserSettings:ParserSettings = null,
+                         rejectionHandler:                                                                                    RejectionHandler = RejectionHandler.default,
+                         exceptionHandler:                                                                                    ExceptionHandler = null): Route = {
     import directives.ExecutionDirectives._
     // optimized as this is the root handler for all akka-http applications
-    BasicDirectives.extractSettings { theSettings ⇒
+    BasicDirectives.extractSettings { theSettings =>
       val effectiveRoutingSettings = if (routingSettings eq null) theSettings else routingSettings
 
       {
         implicit val routingSettings: RoutingSettings = effectiveRoutingSettings
         (handleExceptions(ExceptionHandler.seal(exceptionHandler)) & handleRejections(rejectionHandler.seal))
-          .tapply(_ ⇒ route) // execute above directives eagerly, avoiding useless laziness of Directive.addByNameNullaryApply
+          .tapply(_ => route) // execute above directives eagerly, avoiding useless laziness of Directive.addByNameNullaryApply
       }
     }
   }
@@ -53,8 +54,15 @@ object Route {
   /**
    * Turns a `Route` into a server flow.
    *
-   * This conversion is also implicitly available through [[RouteResult#route2HandlerFlow]].
+   * This conversion is also implicitly available whereever a `Route` is used through [[RouteResult#routeToFlow]].
    */
+  def toFlow(route: Route)(implicit system: ClassicActorSystemProvider): Flow[HttpRequest, HttpResponse, NotUsed] =
+    Flow[HttpRequest].mapAsync(1)(toFunction(route))
+
+  /**
+   * Turns a `Route` into a server flow.
+   */
+  @deprecated("replaced by handlerFlow that takes a system", "10.2.0")
   def handlerFlow(route: Route)(implicit
     routingSettings: RoutingSettings,
                                 parserSettings:   ParserSettings,
@@ -65,9 +73,25 @@ object Route {
                                 exceptionHandler: ExceptionHandler         = null): Flow[HttpRequest, HttpResponse, NotUsed] =
     Flow[HttpRequest].mapAsync(1)(asyncHandler(route))
 
+  def toFunction(route: Route)(implicit system: ClassicActorSystemProvider): HttpRequest => Future[HttpResponse] = {
+    val routingLog = RoutingLog(system.classicSystem.log)
+    val routingSettings = RoutingSettings(system)
+    val parserSettings = ParserSettings.forServer
+
+    // This is essentially the same as `seal(route)` but a bit more efficient because we know we have no inherited settings:
+    val sealedRoute = {
+      import directives.ExecutionDirectives._
+      (handleExceptions(ExceptionHandler.default(routingSettings)) & handleRejections(RejectionHandler.default))
+        .tapply(_ => route)
+    }
+
+    createAsyncHandler(sealedRoute, routingLog, routingSettings, parserSettings)(system.classicSystem.dispatcher, SystemMaterializer(system).materializer)
+  }
+
   /**
    * Turns a `Route` into an async handler function.
    */
+  @deprecated("Use `toFunction` instead, which only requires an implicit ActorSystem and no rejection/exception handlers. Use directives to specify custom exceptions or rejection handlers", "10.2.0")
   def asyncHandler(route: Route)(implicit
     routingSettings: RoutingSettings,
                                  parserSettings:   ParserSettings,
@@ -75,19 +99,18 @@ object Route {
                                  routingLog:       RoutingLog,
                                  executionContext: ExecutionContextExecutor = null,
                                  rejectionHandler: RejectionHandler         = RejectionHandler.default,
-                                 exceptionHandler: ExceptionHandler         = null): HttpRequest ⇒ Future[HttpResponse] = {
+                                 exceptionHandler: ExceptionHandler         = null): HttpRequest => Future[HttpResponse] = {
     val effectiveEC = if (executionContext ne null) executionContext else materializer.executionContext
+    val effectiveParserSettings = if (parserSettings ne null) parserSettings else ParserSettings(ActorMaterializerHelper.downcast(materializer).system)
+    createAsyncHandler(seal(route), routingLog, routingSettings, effectiveParserSettings)(effectiveEC, materializer)
+  }
 
-    {
-      implicit val executionContext = effectiveEC // overrides parameter
-      val effectiveParserSettings = if (parserSettings ne null) parserSettings else ParserSettings(ActorMaterializerHelper.downcast(materializer).system)
-      val sealedRoute = seal(route)
-      request ⇒
-        sealedRoute(new RequestContextImpl(request, routingLog.requestLog(request), routingSettings, effectiveParserSettings)).fast
-          .map {
-            case RouteResult.Complete(response) ⇒ response
-            case RouteResult.Rejected(rejected) ⇒ throw new IllegalStateException(s"Unhandled rejections '$rejected', unsealed RejectionHandler?!")
-          }
-    }
+  private def createAsyncHandler(sealedRoute: Route, routingLog: RoutingLog, routingSettings: RoutingSettings, parserSettings: ParserSettings)(implicit ec: ExecutionContextExecutor, mat: Materializer): HttpRequest => Future[HttpResponse] = {
+    request =>
+      sealedRoute(new RequestContextImpl(request, routingLog.requestLog(request), routingSettings, parserSettings)).fast
+        .map {
+          case RouteResult.Complete(response) => response
+          case RouteResult.Rejected(rejected) => throw new IllegalStateException(s"Unhandled rejections '$rejected', unsealed RejectionHandler?!")
+        }
   }
 }

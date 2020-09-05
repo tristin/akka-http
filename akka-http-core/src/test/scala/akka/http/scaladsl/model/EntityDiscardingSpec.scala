@@ -1,24 +1,22 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.model
 
 import akka.Done
+import akka.http.impl.util.AkkaSpecWithMaterializer
 import akka.http.scaladsl.Http
-import akka.stream.ActorMaterializer
 import akka.stream.scaladsl._
 import akka.testkit._
+
 import scala.concurrent.duration._
 import akka.util.ByteString
 
 import scala.concurrent.{ Await, Promise }
 
-class EntityDiscardingSpec extends AkkaSpec {
-
-  implicit val mat = ActorMaterializer()
-
-  val testData = Vector.tabulate(200)(i ⇒ ByteString(s"row-$i"))
+class EntityDiscardingSpec extends AkkaSpecWithMaterializer {
+  val testData = Vector.tabulate(200)(i => ByteString(s"row-$i"))
 
   "HttpRequest" should {
 
@@ -26,8 +24,8 @@ class EntityDiscardingSpec extends AkkaSpec {
 
       val p = Promise[Done]()
       val s = Source
-        .fromIterator[ByteString](() ⇒ testData.iterator)
-        .alsoTo(Sink.onComplete(t ⇒ p.complete(t)))
+        .fromIterator[ByteString](() => testData.iterator)
+        .alsoTo(Sink.onComplete(t => p.complete(t)))
 
       val req = HttpRequest(entity = HttpEntity(ContentTypes.`text/csv(UTF-8)`, s))
       val de = req.discardEntityBytes()
@@ -43,8 +41,8 @@ class EntityDiscardingSpec extends AkkaSpec {
 
       val p = Promise[Done]()
       val s = Source
-        .fromIterator[ByteString](() ⇒ testData.iterator)
-        .alsoTo(Sink.onComplete(t ⇒ p.complete(t)))
+        .fromIterator[ByteString](() => testData.iterator)
+        .alsoTo(Sink.onComplete(t => p.complete(t)))
 
       val resp = HttpResponse(entity = HttpEntity(ContentTypes.`text/csv(UTF-8)`, s))
       val de = resp.discardEntityBytes()
@@ -56,12 +54,10 @@ class EntityDiscardingSpec extends AkkaSpec {
     // TODO consider improving this by storing a mutable "already materialized" flag somewhere
     // TODO likely this is going to inter-op with the auto-draining as described in #18716
     "should not allow draining a second time" in {
-      val (host, port) = SocketUtil.temporaryServerHostnameAndPort()
-      val bound = Http().bindAndHandleSync(
-        req ⇒
-          HttpResponse(entity = HttpEntity(
-            ContentTypes.`text/csv(UTF-8)`, Source.fromIterator[ByteString](() ⇒ testData.iterator))),
-        host, port).futureValue
+      val (host, port) = SocketUtil2.temporaryServerHostnameAndPort()
+      val bound = Http().newServerAt(host, port).bindSync(req =>
+        HttpResponse(entity = HttpEntity(
+          ContentTypes.`text/csv(UTF-8)`, Source.fromIterator[ByteString](() => testData.iterator)))).futureValue
 
       try {
 
@@ -72,7 +68,7 @@ class EntityDiscardingSpec extends AkkaSpec {
 
         val de2 = response.discardEntityBytes()
         val secondRunException = intercept[IllegalStateException] { Await.result(de2.future, 3.seconds.dilated) }
-        secondRunException.getMessage should include("Source cannot be materialized more than once")
+        secondRunException.getMessage should include("cannot be materialized more than once")
       } finally bound.unbind().futureValue
     }
   }

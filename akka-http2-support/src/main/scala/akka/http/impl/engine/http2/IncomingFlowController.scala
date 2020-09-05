@@ -1,11 +1,11 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.engine.http2
 
 import akka.annotation.InternalApi
-import akka.http.scaladsl.settings.Http2ServerSettings
+import akka.http.scaladsl.settings.Http2CommonSettings
 
 /** INTERNAL API */
 @InternalApi
@@ -27,7 +27,7 @@ private[http2] object IncomingFlowController {
     val NoIncrements = WindowIncrements(0, 0)
   }
 
-  def default(settings: Http2ServerSettings): IncomingFlowController =
+  def default(settings: Http2CommonSettings): IncomingFlowController =
     default(settings.incomingConnectionLevelBufferSize, settings.incomingStreamLevelBufferSize)
 
   /** The default scheme sends out WINDOW_UPDATE frames when buffered + outstanding data falls below half of the maximum configured size */

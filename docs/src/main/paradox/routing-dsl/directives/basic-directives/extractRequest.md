@@ -4,13 +4,13 @@
 
 ## Signature
 
-@@signature [BasicDirectives.scala]($akka-http$/akka-http/src/main/scala/akka/http/scaladsl/server/directives/BasicDirectives.scala) { #extractRequest }
+@@signature [BasicDirectives.scala](/akka-http/src/main/scala/akka/http/scaladsl/server/directives/BasicDirectives.scala) { #extractRequest }
 
 @@@
 
 ## Description
 
-Extracts the complete @unidoc[HttpRequest] instance.
+Extracts the complete @apidoc[HttpRequest] instance.
 
 Use `extractRequest` to extract just the complete URI of the request. Usually there's little use of
 extracting the complete request because extracting of most of the aspects of HttpRequests is handled by specialized

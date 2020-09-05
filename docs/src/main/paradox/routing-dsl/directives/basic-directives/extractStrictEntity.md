@@ -4,13 +4,13 @@
 
 ## Signature
 
-@@signature [BasicDirectives.scala]($akka-http$/akka-http/src/main/scala/akka/http/scaladsl/server/directives/BasicDirectives.scala) { #extractStrictEntity }
+@@signature [BasicDirectives.scala](/akka-http/src/main/scala/akka/http/scaladsl/server/directives/BasicDirectives.scala) { #extractStrictEntity }
 
 @@@
 
 ## Description
 
-Extracts the strict http entity as `HttpEntity.Strict` from the @unidoc[RequestContext].
+Extracts the strict http entity as `HttpEntity.Strict` from the @apidoc[RequestContext].
 
 A timeout parameter is given and if the stream isn't completed after the timeout, the directive will be failed.
 

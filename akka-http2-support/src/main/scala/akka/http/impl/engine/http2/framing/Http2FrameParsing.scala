@@ -1,24 +1,51 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.engine.http2
 package framing
 
 import scala.collection.immutable
+import akka.event.LoggingAdapter
 import akka.stream.Attributes
 import akka.stream.impl.io.ByteStringParser
 import akka.stream.stage.GraphStageLogic
-import Http2Protocol.FrameType._
+import akka.util.OptionVal
 import Http2Protocol.{ ErrorCode, Flags, FrameType, SettingIdentifier }
 import akka.annotation.InternalApi
-
 import FrameEvent._
+
+import scala.annotation.tailrec
 
 /** INTERNAL API */
 @InternalApi
-private[http2] class Http2FrameParsing(shouldReadPreface: Boolean) extends ByteStringParser[FrameEvent] {
+private[http] object Http2FrameParsing {
+
+  def readSettings(payload: ByteStringParser.ByteReader, log: LoggingAdapter): immutable.Seq[Setting] = {
+    @tailrec def readSettings(read: List[Setting]): immutable.Seq[Setting] =
+      if (payload.hasRemaining) {
+        val id = payload.readShortBE()
+        val value = payload.readIntBE()
+        val read0 = SettingIdentifier.byId(id) match {
+          case OptionVal.Some(s) =>
+            Setting(s, value) :: read
+          case OptionVal.None =>
+            log.debug("Ignoring unknown setting identifier {}", id)
+            read
+        }
+        readSettings(read0)
+      } else read.reverse
+
+    readSettings(Nil)
+  }
+
+}
+
+/** INTERNAL API */
+@InternalApi
+private[http2] class Http2FrameParsing(shouldReadPreface: Boolean, log: LoggingAdapter) extends ByteStringParser[FrameEvent] {
   import ByteStringParser._
+  import Http2FrameParsing._
 
   abstract class Step extends ParseStep[FrameEvent]
 
@@ -41,25 +68,30 @@ private[http2] class Http2FrameParsing(shouldReadPreface: Boolean) extends ByteS
       object ReadFrame extends Step {
         override def parse(reader: ByteReader): ParseResult[FrameEvent] = {
           val length = reader.readShortBE() << 8 | reader.readByte()
-          val tpe = reader.readByte() // TODO: make sure it's valid
+          val tpe = reader.readByte()
           val flags = new ByteFlag(reader.readByte())
           val streamId = reader.readIntBE()
           // TODO: assert that reserved bit is 0 by checking if streamId > 0
           val payload = reader.take(length)
-          val frame = parseFrame(FrameType.byId(tpe), flags, streamId, new ByteReader(payload))
-
-          ParseResult(Some(frame), ReadFrame, acceptUpstreamFinish = true)
+          val maybeframe = FrameType.byId(tpe) match {
+            case OptionVal.Some(ft) =>
+              Some(parseFrame(ft, flags, streamId, new ByteReader(payload)))
+            case OptionVal.None =>
+              log.debug("Ignoring unknown frame type {}", tpe)
+              None
+          }
+          ParseResult(maybeframe, ReadFrame, acceptUpstreamFinish = true)
         }
       }
 
       def parseFrame(tpe: FrameType, flags: ByteFlag, streamId: Int, payload: ByteReader): FrameEvent = {
         // TODO: add @switch? seems non-trivial for now
         tpe match {
-          case GOAWAY ⇒
+          case FrameType.GOAWAY =>
             Http2Compliance.requireZeroStreamId(streamId)
             GoAwayFrame(payload.readIntBE(), ErrorCode.byId(payload.readIntBE()), payload.takeAll())
 
-          case HEADERS ⇒
+          case FrameType.HEADERS =>
             val pad = Flags.PADDED.isSet(flags)
             val endStream = Flags.END_STREAM.isSet(flags)
             val endHeaders = Flags.END_HEADERS.isSet(flags)
@@ -83,7 +115,7 @@ private[http2] class Http2FrameParsing(shouldReadPreface: Boolean) extends ByteS
 
             HeadersFrame(streamId, endStream, endHeaders, payload.take(payload.remainingSize - paddingLength), priorityInfo)
 
-          case DATA ⇒
+          case FrameType.DATA =>
             val pad = Flags.PADDED.isSet(flags)
             val endStream = Flags.END_STREAM.isSet(flags)
 
@@ -93,7 +125,7 @@ private[http2] class Http2FrameParsing(shouldReadPreface: Boolean) extends ByteS
 
             DataFrame(streamId, endStream, payload.take(payload.remainingSize - paddingLength))
 
-          case SETTINGS ⇒
+          case FrameType.SETTINGS =>
             val ack = Flags.ACK.isSet(flags)
             Http2Compliance.requireZeroStreamId(streamId)
 
@@ -104,19 +136,12 @@ private[http2] class Http2FrameParsing(shouldReadPreface: Boolean) extends ByteS
 
               SettingsAckFrame(Nil) // TODO if we were to send out settings, here would be the spot to include the acks for the ones we've sent out
             } else {
-              def readSettings(read: List[Setting]): immutable.Seq[Setting] =
-                if (payload.hasRemaining) {
-                  val id = payload.readShortBE()
-                  val value = payload.readIntBE()
-                  if (isKnownId(id)) readSettings(Setting(SettingIdentifier.byId(id), value) :: read)
-                  else readSettings(read)
-                } else read.reverse
 
               if (payload.remainingSize % 6 != 0) throw new Http2Compliance.IllegalPayloadLengthInSettingsFrame(payload.remainingSize, "SETTINGS payload MUST be a multiple of multiple of 6 octets")
-              SettingsFrame(readSettings(Nil))
+              SettingsFrame(readSettings(payload, log))
             }
 
-          case WINDOW_UPDATE ⇒
+          case FrameType.WINDOW_UPDATE =>
             // TODO: check frame size
             // TODO: check flags
             val increment = payload.readIntBE()
@@ -124,23 +149,24 @@ private[http2] class Http2FrameParsing(shouldReadPreface: Boolean) extends ByteS
 
             WindowUpdateFrame(streamId, increment)
 
-          case CONTINUATION ⇒
+          case FrameType.CONTINUATION =>
             val endHeaders = Flags.END_HEADERS.isSet(flags)
 
             ContinuationFrame(streamId, endHeaders, payload.remainingData)
 
-          case PING ⇒
+          case FrameType.PING =>
             // see 6.7
             Http2Compliance.requireFrameSize(payload.remainingSize, 8)
             Http2Compliance.requireZeroStreamId(streamId)
             val ack = Flags.ACK.isSet(flags)
             PingFrame(ack, payload.remainingData)
 
-          case RST_STREAM ⇒
+          case FrameType.RST_STREAM =>
             Http2Compliance.requireFrameSize(payload.remainingSize, 4)
+            Http2Compliance.requireNonZeroStreamId(streamId)
             RstStreamFrame(streamId, ErrorCode.byId(payload.readIntBE()))
 
-          case PRIORITY ⇒
+          case FrameType.PRIORITY =>
             Http2Compliance.requireFrameSize(payload.remainingSize, 5)
             val streamDependency = payload.readIntBE() // whole word
             val exclusiveFlag = (streamDependency >>> 31) == 1 // most significant bit for exclusive flag
@@ -149,7 +175,7 @@ private[http2] class Http2FrameParsing(shouldReadPreface: Boolean) extends ByteS
             Http2Compliance.requireNoSelfDependency(streamId, dependencyId)
             PriorityFrame(streamId, exclusiveFlag, dependencyId, priority)
 
-          case PUSH_PROMISE ⇒
+          case FrameType.PUSH_PROMISE =>
             val pad = Flags.PADDED.isSet(flags)
             val endHeaders = Flags.END_HEADERS.isSet(flags)
 
@@ -161,7 +187,7 @@ private[http2] class Http2FrameParsing(shouldReadPreface: Boolean) extends ByteS
 
             PushPromiseFrame(streamId, endHeaders, promisedStreamId, payload.take(payload.remainingSize - paddingLength))
 
-          case tpe ⇒ // TODO: remove once all stream types are defined
+          case tpe => // TODO: remove once all stream types are defined
             UnknownFrameEvent(tpe, flags, streamId, payload.remainingData)
         }
       }

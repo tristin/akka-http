@@ -4,7 +4,7 @@
 
 ## Signature
 
-@@signature [FileAndResourceDirectives.scala]($akka-http$/akka-http/src/main/scala/akka/http/scaladsl/server/directives/FileAndResourceDirectives.scala) { #getFromDirectory }
+@@signature [FileAndResourceDirectives.scala](/akka-http/src/main/scala/akka/http/scaladsl/server/directives/FileAndResourceDirectives.scala) { #getFromDirectory }
 
 @@@
 
@@ -12,7 +12,7 @@
 
 Allows exposing a directory's files for `GET` requests for its contents.
 
-The `unmatchedPath` (see @ref[extractUnmatchedPath](../basic-directives/extractUnmatchedPath.md)) of the @unidoc[RequestContext] is first transformed by
+The `unmatchedPath` (see @ref[extractUnmatchedPath](../basic-directives/extractUnmatchedPath.md)) of the @apidoc[RequestContext] is first transformed by
 the given `pathRewriter` function, before being appended to the given directory name to build the final file name.
 
 To serve a single file use @ref[getFromFile](getFromFile.md).

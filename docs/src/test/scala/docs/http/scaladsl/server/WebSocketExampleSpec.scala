@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package docs.http.scaladsl.server
@@ -10,28 +10,27 @@ import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model.ws.{ BinaryMessage, Message, WebSocketRequest }
 import akka.http.scaladsl.settings.{ ClientConnectionSettings, ServerSettings }
-import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.{ Flow, Sink }
 import akka.util.ByteString
+import com.github.ghik.silencer.silent
 import docs.CompileOnlySpec
-import org.scalatest.{ Matchers, WordSpec }
 
 import scala.io.StdIn
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
 
-class WebSocketExampleSpec extends WordSpec with Matchers with CompileOnlySpec {
+class WebSocketExampleSpec extends AnyWordSpec with Matchers with CompileOnlySpec {
   "core-example" in compileOnlySpec {
     //#websocket-example-using-core
     import akka.actor.ActorSystem
-    import akka.stream.ActorMaterializer
     import akka.stream.scaladsl.{ Source, Flow }
     import akka.http.scaladsl.Http
-    import akka.http.scaladsl.model.ws.UpgradeToWebSocket
+    import akka.http.scaladsl.model.AttributeKeys.webSocketUpgrade
     import akka.http.scaladsl.model.ws.{ TextMessage, Message }
     import akka.http.scaladsl.model.{ HttpResponse, Uri, HttpRequest }
     import akka.http.scaladsl.model.HttpMethods._
 
     implicit val system = ActorSystem()
-    implicit val materializer = ActorMaterializer()
 
     //#websocket-handler
     // The Greeter WebSocket Service expects a "name" per message and
@@ -54,7 +53,7 @@ class WebSocketExampleSpec extends WordSpec with Matchers with CompileOnlySpec {
     //#websocket-request-handling
     val requestHandler: HttpRequest => HttpResponse = {
       case req @ HttpRequest(GET, Uri.Path("/greeter"), _, _, _) =>
-        req.header[UpgradeToWebSocket] match {
+        req.attribute(webSocketUpgrade) match {
           case Some(upgrade) => upgrade.handleMessages(greeterWebSocketService)
           case None          => HttpResponse(400, entity = "Not a valid websocket request!")
         }
@@ -65,7 +64,7 @@ class WebSocketExampleSpec extends WordSpec with Matchers with CompileOnlySpec {
     //#websocket-request-handling
 
     val bindingFuture =
-      Http().bindAndHandleSync(requestHandler, interface = "localhost", port = 8080)
+      Http().newServerAt("localhost", 8080).bindSync(requestHandler)
 
     println(s"Server online at http://localhost:8080/\nPress RETURN to stop...")
     StdIn.readLine()
@@ -77,14 +76,12 @@ class WebSocketExampleSpec extends WordSpec with Matchers with CompileOnlySpec {
   }
   "routing-example" in compileOnlySpec {
     import akka.actor.ActorSystem
-    import akka.stream.ActorMaterializer
     import akka.stream.scaladsl.{ Source, Flow }
     import akka.http.scaladsl.Http
     import akka.http.scaladsl.model.ws.{ TextMessage, Message }
     import akka.http.scaladsl.server.Directives
 
     implicit val system = ActorSystem()
-    implicit val materializer = ActorMaterializer()
 
     import Directives._
 
@@ -107,7 +104,7 @@ class WebSocketExampleSpec extends WordSpec with Matchers with CompileOnlySpec {
       }
     //#websocket-routing
 
-    val bindingFuture = Http().bindAndHandle(route, "localhost", 8080)
+    val bindingFuture = Http().newServerAt("localhost", port = 8080).bind(route)
 
     println(s"Server online at http://localhost:8080/\nPress RETURN to stop...")
     StdIn.readLine()
@@ -119,33 +116,28 @@ class WebSocketExampleSpec extends WordSpec with Matchers with CompileOnlySpec {
   }
 
   "ping-server-example" in compileOnlySpec {
-    implicit val system: ActorSystem = ???
-    implicit val mat: ActorMaterializer = ???
+    implicit val system: ActorSystem = null
+    val route = null
     //#websocket-ping-payload-server
     val defaultSettings = ServerSettings(system)
 
     val pingCounter = new AtomicInteger()
-    val customWebsocketSettings =
-      defaultSettings.websocketSettings
-        .withPeriodicKeepAliveData(() ⇒ ByteString(s"debug-${pingCounter.incrementAndGet()}"))
 
-    val customServerSettings =
-      defaultSettings.withWebsocketSettings(customWebsocketSettings)
-
-    Http().bindAndHandle(???, "127.0.0.1", settings = customServerSettings)
+    Http().newServerAt("127.0.0.1", 0)
+      .adaptSettings(_.mapWebsocketSettings(_.withPeriodicKeepAliveData(() => ByteString(s"debug-${pingCounter.incrementAndGet()}"))))
+      .bind(route)
     //#websocket-ping-payload-server
   }
 
   "ping-example" in compileOnlySpec {
-    implicit val system: ActorSystem = ???
-    implicit val mat: ActorMaterializer = ???
+    implicit val system: ActorSystem = null
     //#websocket-client-ping-payload
     val defaultSettings = ClientConnectionSettings(system)
 
     val pingCounter = new AtomicInteger()
     val customWebsocketSettings =
       defaultSettings.websocketSettings
-        .withPeriodicKeepAliveData(() ⇒ ByteString(s"debug-${pingCounter.incrementAndGet()}"))
+        .withPeriodicKeepAliveData(() => ByteString(s"debug-${pingCounter.incrementAndGet()}"))
 
     val customSettings =
       defaultSettings.withWebsocketSettings(customWebsocketSettings)

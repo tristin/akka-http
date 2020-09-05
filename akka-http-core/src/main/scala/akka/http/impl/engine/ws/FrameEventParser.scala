@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.engine.ws
@@ -63,9 +63,9 @@ private[http] object FrameEventParser extends ByteStringParser[FrameEvent] {
 
         val length =
           length7 match {
-            case 126 ⇒ reader.readShortBE().toLong
-            case 127 ⇒ reader.readLongBE()
-            case x   ⇒ x.toLong
+            case 126 => reader.readShortBE().toLong
+            case 127 => reader.readLongBE()
+            case x   => x.toLong
           }
 
         if (length < 0) throw new ProtocolException("Highest bit of 64bit length was set")
@@ -112,22 +112,45 @@ private[http] object FrameEventParser extends ByteStringParser[FrameEvent] {
 
   def mask(bytes: ByteString, _mask: Option[Int]): ByteString =
     _mask match {
-      case Some(m) ⇒ mask(bytes, m)._1
-      case None    ⇒ bytes
+      case Some(m) => mask(bytes, m)._1
+      case None    => bytes
     }
 
   def mask(bytes: ByteString, mask: Int): (ByteString, Int) = {
-    @tailrec def rec(bytes: Array[Byte], offset: Int, mask: Int): Int =
-      if (offset >= bytes.length) mask
-      else {
-        val newMask = Integer.rotateLeft(mask, 8) // we cycle through the mask in BE order
-        bytes(offset) = (bytes(offset) ^ (newMask & 0xff)).toByte
-        rec(bytes, offset + 1, newMask)
+    val m0 = ((mask >> 24) & 0xff).toByte
+    val m1 = ((mask >> 16) & 0xff).toByte
+    val m2 = ((mask >> 8) & 0xff).toByte
+    val m3 = ((mask >> 0) & 0xff).toByte
+
+    @tailrec def rec(bytes: Array[Byte], offset: Int, last: Int): Unit =
+      if (offset < last) {
+        // process four bytes each turn
+        bytes(offset + 0) = (bytes(offset + 0) ^ m0).toByte
+        bytes(offset + 1) = (bytes(offset + 1) ^ m1).toByte
+        bytes(offset + 2) = (bytes(offset + 2) ^ m2).toByte
+        bytes(offset + 3) = (bytes(offset + 3) ^ m3).toByte
+
+        rec(bytes, offset + 4, last)
+      } else {
+        val len = bytes.length
+
+        if (last < len) {
+          bytes(last) = (bytes(last) ^ m0).toByte
+
+          if (last + 1 < len) {
+            bytes(last + 1) = (bytes(last + 1) ^ m1).toByte
+
+            if (last + 2 < len)
+              bytes(last + 2) = (bytes(last + 2) ^ m2).toByte
+          }
+        }
       }
 
     val buffer = bytes.toArray[Byte]
-    val newMask = rec(buffer, 0, mask)
-    (ByteString(buffer), newMask)
+    rec(buffer, 0, (bytes.length / 4) * 4)
+
+    val newMask = Integer.rotateLeft(mask, (bytes.length % 4) * 8)
+    (ByteString.fromArrayUnsafe(buffer), newMask)
   }
 
   def parseCloseCode(data: ByteString): Option[(Int, String)] = {

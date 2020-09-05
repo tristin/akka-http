@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.engine.parsing
@@ -32,6 +32,7 @@ private[http] object ParserOutput {
     method:            HttpMethod,
     uri:               Uri,
     protocol:          HttpProtocol,
+    attributes:        Map[AttributeKey[_], _],
     headers:           List[HttpHeader],
     createEntity:      EntityCreator[RequestOutput, RequestEntity],
     expect100Continue: Boolean,
@@ -66,7 +67,7 @@ private[http] object ParserOutput {
 
   //////////////////////////////////////
 
-  sealed abstract class EntityCreator[-A <: ParserOutput, +B <: HttpEntity] extends (Source[A, NotUsed] ⇒ B)
+  sealed abstract class EntityCreator[-A <: ParserOutput, +B <: HttpEntity] extends (Source[A, NotUsed] => B)
 
   /**
    * An entity creator that uses the given entity directly and ignores the passed-in source.
@@ -82,7 +83,7 @@ private[http] object ParserOutput {
   /**
    * An entity creator that creates the entity from the a source of parts.
    */
-  final case class StreamedEntityCreator[-A <: ParserOutput, +B <: HttpEntity](creator: Source[A, NotUsed] ⇒ B)
+  final case class StreamedEntityCreator[-A <: ParserOutput, +B <: HttpEntity](creator: Source[A, NotUsed] => B)
     extends EntityCreator[A, B] {
     def apply(parts: Source[A, NotUsed]) = creator(parts)
   }

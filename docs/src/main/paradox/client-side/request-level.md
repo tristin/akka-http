@@ -19,27 +19,27 @@ or an extra pool just for the long-running connection instead.
 
 ## Future-Based Variant
 
-Most often, your HTTP client needs are very basic. You simply need the HTTP response for a certain request and don't
+Most often, your HTTP client needs are very basic. You need the HTTP response for a certain request and don't
 want to bother with setting up a full-blown streaming infrastructure.
 
-For these cases Akka HTTP offers the @scala[`Http().singleRequest(...)`]@java[`Http.get(system).singleRequest(...)`] method, which simply turns an @unidoc[HttpRequest] instance
+For these cases Akka HTTP offers the @scala[`Http().singleRequest(...)`]@java[`Http.get(system).singleRequest(...)`] method, which turns an @apidoc[HttpRequest] instance
 into @scala[`Future[HttpResponse]`]@java[`CompletionStage<HttpResponse>`]. Internally the request is dispatched across the (cached) host connection pool for the
 request's effective URI.
 
-Just like in the case of the super-pool flow described above the request must have either an absolute URI or a valid
+The request must have either an absolute URI or a valid
 `Host` header, otherwise the returned future will be completed with an error.
 
 ### Example
 
 Scala
-:   @@snip [HttpClientExampleSpec.scala]($test$/scala/docs/http/scaladsl/HttpClientExampleSpec.scala) { #single-request-example }
+:   @@snip [HttpClientSingleRequest.scala]($test$/scala/docs/http/scaladsl/HttpClientSingleRequest.scala)
 
 Java
 :   @@snip [HttpClientExampleDocTest.java]($test$/java/docs/http/javadsl/HttpClientExampleDocTest.java) { #single-request-example }
 
 ### Using the Future-Based API in Actors
 
-When using the @scala[`Future`]@java[`CompletionStage`] based API from inside an @unidoc[Actor], all the usual caveats apply to how one should deal
+When using the @scala[`Future`]@java[`CompletionStage`] based API from inside a classic Akka @apidoc[Actor], all the usual caveats apply to how one should deal
 with the futures completion. For example you should not access the actor's state from within the @scala[`Future`]@java[`CompletionStage`]'s callbacks
 (such as `map`, `onComplete`, ...) and instead you should use the @scala[`pipeTo`]@java[`pipe`] pattern to pipe the result back
 to the actor as a message:
@@ -52,8 +52,8 @@ Java
 
 @@@ warning
 
-Always make sure you consume the response entity streams (of type @scala[@unidoc[Source[ByteString,Unit]]]@java[@unidoc[Source[ByteString, Object]]]) 
-by for example connecting it to a @unidoc[Sink] or by calling @scala[`response.discardEntityBytes()`]@java[`response.discardEntityBytes(Materializer)`] 
+Always make sure you consume the response entity streams (of type @scala[@apidoc[Source[ByteString,Unit]]]@java[@apidoc[Source[ByteString, Object]]]) 
+by for example connecting it to a @apidoc[Sink] or by calling @scala[`response.discardEntityBytes()`]@java[`response.discardEntityBytes(Materializer)`] 
 if you don't care about the response entity. Otherwise Akka HTTP (and the underlying Streams infrastructure) will understand the
 lack of entity consumption as a back-pressure signal and stop reading from the underlying TCP connection!
 
@@ -61,8 +61,7 @@ This is a feature of Akka HTTP that allows consuming entities (and pulling them 
 a streaming fashion, and only *on demand* when the client is ready to consume the bytes -
 it may be a bit surprising at first though.
 
-There are tickets open about automatically dropping entities if not consumed ([#183](https://github.com/akka/akka-http/issues/183) and [#117](https://github.com/akka/akka-http/issues/117)),
-so these may be implemented in the near future.
+When response entities are not subscribed to within `akka.http.host-connection-pool.response-entity-subscription-timeout`, the stream will fail with a `TimeoutException: Response entity was not subscribed after ...`.
 
 @@@
 
@@ -72,7 +71,7 @@ The flow-based variant of the request-level client-side API is presented by the 
 It creates a new "super connection pool flow", which routes incoming requests to a (cached) host connection pool
 depending on their respective effective URIs.
 
-The @unidoc[Flow] returned by @scala[`Http().superPool(...)`]@java[`Http.get(system).superPool(...)`] is very similar to the one from the @ref[Host-Level Client-Side API](host-level.md), so the
+The @apidoc[Flow] returned by @scala[`Http().superPool(...)`]@java[`Http.get(system).superPool(...)`] is very similar to the one from the @ref[Host-Level Client-Side API](host-level.md), so the
 @ref[Using a Host Connection Pool](host-level.md#using-a-host-connection-pool) section also applies here.
 
 However, there is one notable difference between a "host connection pool client flow" for the host-level API and a
@@ -89,7 +88,7 @@ For a super-pool flow this is not the case. All requests to a super-pool must ei
 Sometimes we would like to get only headers of specific type which are sent from a server. In order to collect headers in a type safe way Akka HTTP API provides a type for each HTTP header. Here is an example for getting all cookies set by a server (`Set-Cookie` header):
 
 Scala
-:   @@snip [HttpClientExampleSpec.scala]($test$/scala/docs/http/scaladsl/HttpClientExampleSpec.scala) { #collecting-headers-example }
+:   @@snip [HttpClientExampleSpec.scala]($test$/scala/docs/http/scaladsl/HttpClientCollectingHeaders.scala)
 
 Java
 :   @@snip [HttpClientExampleDocTest.java]($test$/java/docs/http/javadsl/HttpClientExampleDocTest.java) { #collecting-headers-example }

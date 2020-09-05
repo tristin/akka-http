@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.model.ws
@@ -9,7 +9,7 @@ import scala.collection.immutable
 import akka.NotUsed
 import akka.stream._
 import akka.http.impl.util.JavaMapping
-import akka.http.javadsl.{ model ⇒ jm }
+import akka.http.javadsl.{ model => jm }
 import akka.http.scaladsl.model.HttpResponse
 
 /**
@@ -17,13 +17,14 @@ import akka.http.scaladsl.model.HttpResponse
  * enables a request handler to upgrade this connection to a WebSocket connection and
  * registers a WebSocket handler.
  */
-trait UpgradeToWebSocket extends jm.ws.UpgradeToWebSocket {
+@deprecated("This low-level API has been replaced by an attribute.", since = "10.2.0")
+trait UpgradeToWebSocket extends jm.ws.UpgradeToWebSocket with WebSocketUpgrade {
   /**
    * A sequence of protocols the client accepts.
    *
    * See http://tools.ietf.org/html/rfc6455#section-1.9
    */
-  def requestedProtocols: immutable.Seq[String]
+  override def requestedProtocols: immutable.Seq[String]
 
   /**
    * The high-level interface to create a WebSocket server based on "messages".
@@ -34,7 +35,7 @@ trait UpgradeToWebSocket extends jm.ws.UpgradeToWebSocket {
    *
    * Optionally, a subprotocol out of the ones requested by the client can be chosen.
    */
-  def handleMessages(
+  override def handleMessages(
     handlerFlow: Graph[FlowShape[Message, Message], Any],
     subprotocol: Option[String]                          = None): HttpResponse
 
@@ -48,7 +49,7 @@ trait UpgradeToWebSocket extends jm.ws.UpgradeToWebSocket {
    *
    * Optionally, a subprotocol out of the ones requested by the client can be chosen.
    */
-  def handleMessagesWithSinkSource(
+  override def handleMessagesWithSinkSource(
     inSink:      Graph[SinkShape[Message], Any],
     outSource:   Graph[SourceShape[Message], Any],
     subprotocol: Option[String]                   = None): HttpResponse =
@@ -59,30 +60,30 @@ trait UpgradeToWebSocket extends jm.ws.UpgradeToWebSocket {
   /**
    * Java API
    */
-  def getRequestedProtocols(): Iterable[String] = requestedProtocols.asJava
+  override def getRequestedProtocols(): Iterable[String] = requestedProtocols.asJava
 
   /**
    * Java API
    */
-  def handleMessagesWith(handlerFlow: Graph[FlowShape[jm.ws.Message, jm.ws.Message], _ <: Any]): HttpResponse =
+  override def handleMessagesWith(handlerFlow: Graph[FlowShape[jm.ws.Message, jm.ws.Message], _ <: Any]): HttpResponse =
     handleMessages(JavaMapping.toScala(handlerFlow))
 
   /**
    * Java API
    */
-  def handleMessagesWith(handlerFlow: Graph[FlowShape[jm.ws.Message, jm.ws.Message], _ <: Any], subprotocol: String): HttpResponse =
+  override def handleMessagesWith(handlerFlow: Graph[FlowShape[jm.ws.Message, jm.ws.Message], _ <: Any], subprotocol: String): HttpResponse =
     handleMessages(JavaMapping.toScala(handlerFlow), subprotocol = Some(subprotocol))
 
   /**
    * Java API
    */
-  def handleMessagesWith(inSink: Graph[SinkShape[jm.ws.Message], _ <: Any], outSource: Graph[SourceShape[jm.ws.Message], _ <: Any]): HttpResponse =
+  override def handleMessagesWith(inSink: Graph[SinkShape[jm.ws.Message], _ <: Any], outSource: Graph[SourceShape[jm.ws.Message], _ <: Any]): HttpResponse =
     handleMessages(createScalaFlow(inSink, outSource))
 
   /**
    * Java API
    */
-  def handleMessagesWith(
+  override def handleMessagesWith(
     inSink:      Graph[SinkShape[jm.ws.Message], _ <: Any],
     outSource:   Graph[SourceShape[jm.ws.Message], _ <: Any],
     subprotocol: String): HttpResponse =

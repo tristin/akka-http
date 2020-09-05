@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.javadsl.model;
@@ -7,12 +7,13 @@ package akka.http.javadsl.model;
 import akka.Done;
 import akka.actor.ActorSystem;
 import akka.japi.function.Procedure;
-import akka.stream.ActorMaterializer;
+import akka.stream.Materializer;
+import akka.stream.SystemMaterializer;
 import akka.stream.javadsl.Sink;
 import akka.stream.javadsl.Source;
 import akka.util.ByteString;
 import org.junit.Test;
-import org.scalatest.junit.JUnitSuite;
+import org.scalatestplus.junit.JUnitSuite;
 
 import scala.util.Try;
 
@@ -24,7 +25,6 @@ import static org.junit.Assert.assertEquals;
 public class EntityDiscardingTest extends JUnitSuite {
 
   private ActorSystem sys = ActorSystem.create("test");
-  private ActorMaterializer mat = ActorMaterializer.create(sys);
   private Iterable<ByteString> testData = Arrays.asList(ByteString.fromString("abc"), ByteString.fromString("def"));
 
   @Test
@@ -36,7 +36,7 @@ public class EntityDiscardingTest extends JUnitSuite {
     RequestEntity reqEntity = HttpEntities.create(ContentTypes.TEXT_PLAIN_UTF8, s);
     HttpRequest req = HttpRequest.create().withEntity(reqEntity);
 
-    HttpMessage.DiscardedEntity de = req.discardEntityBytes(mat);
+    HttpMessage.DiscardedEntity de = req.discardEntityBytes(sys);
 
     assertEquals(Done.getInstance(), f.join());
     assertEquals(Done.getInstance(), de.completionStage().toCompletableFuture().join());
@@ -51,7 +51,7 @@ public class EntityDiscardingTest extends JUnitSuite {
     ResponseEntity respEntity = HttpEntities.create(ContentTypes.TEXT_PLAIN_UTF8, s);
     HttpResponse resp = HttpResponse.create().withEntity(respEntity);
 
-    HttpMessage.DiscardedEntity de = resp.discardEntityBytes(mat);
+    HttpMessage.DiscardedEntity de = resp.discardEntityBytes(sys);
 
     assertEquals(Done.getInstance(), f.join());
     assertEquals(Done.getInstance(), de.completionStage().toCompletableFuture().join());

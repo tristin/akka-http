@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2017-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka
@@ -10,8 +10,8 @@ object GitHub {
     System.getenv("PR_VALIDATOR_GH_TOKEN")
       .ensuring(_ != null, "No PR_VALIDATOR_GH_TOKEN env var provided, unable to reach github!")
 
-  def url(v: String): String = {
-    val branch = if (v.endsWith("SNAPSHOT")) "master" else "v" + v
-    "http://github.com/akka/akka-http/tree/" + branch
+  def url(v: String, isSnapshot: Boolean): String = {
+    val branch = if (isSnapshot) "master" else "v" + v
+    "https://github.com/akka/akka-http/tree/" + branch
   }
 }

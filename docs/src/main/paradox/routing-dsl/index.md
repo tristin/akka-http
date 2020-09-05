@@ -1,7 +1,7 @@
 # Routing DSL
 
-In addition to the @ref[Core Server API](../server-side/low-level-api.md) Akka HTTP provides a very flexible "Routing DSL" for elegantly
-defining RESTful web services. It picks up where the low-level API leaves off and offers much of the higher-level
+Akka HTTP provides a flexible routing DSL for elegantly defining RESTful web services.
+It picks up where the @ref[low-level API](../server-side/low-level-api.md) leaves off and offers much of the higher-level
 functionality of typical web servers or frameworks, like deconstruction of URIs, content negotiation or
 static content serving.
 
@@ -16,6 +16,7 @@ from a background with non-"streaming first" HTTP Servers.
 @@@ index
 
 * [overview](overview.md)
+* [play](play-comparison.md)
 * [routes](routes.md)
 * [directives/index](directives/index.md)
 * [rejections](rejections.md)
@@ -23,8 +24,8 @@ from a background with non-"streaming first" HTTP Servers.
 * [path-matchers](path-matchers.md)
 * [case-class-extraction](case-class-extraction.md)
 * [source-streaming-support](source-streaming-support.md)
+* [style](style-guide.md)
 * [testkit](testkit.md)
-* [http-app](HttpApp.md)
 
 @@@
 
@@ -33,29 +34,12 @@ from a background with non-"streaming first" HTTP Servers.
 This is a complete, very basic Akka HTTP application relying on the Routing DSL:
 
 Scala
-:  @@snip [HttpServerExampleSpec.scala]($test$/scala/docs/http/scaladsl/HttpServerExampleSpec.scala) { #minimal-routing-example }
+:  @@snip [HttpServerRoutingMinimal.scala]($test$/scala/docs/http/scaladsl/HttpServerRoutingMinimal.scala)
 
 Java
 :  @@snip [HttpServerMinimalExampleTest.java]($test$/java/docs/http/javadsl/HttpServerMinimalExampleTest.java) { #minimal-routing-example }
 
 It starts an HTTP Server on localhost and replies to GET requests to `/hello` with a simple response.
-
-@@@ warning { title="API may change" }
-The following example uses an experimental feature and its API is subjected to change in future releases of Akka HTTP.
-For further information about this marker, see @extref:[The @DoNotInherit and @ApiMayChange markers](akka-docs:common/binary-compatibility-rules.html#The_@DoNotInherit_and_@ApiMayChange_markers)
-in the Akka documentation.
-@@@
-
-To help start a server Akka HTTP provides an experimental helper class called @unidoc[HttpApp].
-This is the same example as before rewritten using @unidoc[HttpApp]:
-
-Scala
-:  @@snip [HttpAppExampleSpec.scala]($test$/scala/docs/http/scaladsl/HttpAppExampleSpec.scala) { #minimal-routing-example }
-
-Java
-:  @@snip [HttpAppExampleTest.java]($test$/java/docs/http/javadsl/server/HttpAppExampleTest.java) { #minimal-routing-example }
-
-See @ref[HttpApp Bootstrap](HttpApp.md) for more details about setting up a server using this approach.
 
 @@@ div { .group-scala }
 
@@ -68,6 +52,60 @@ the Routing DSL will look like:
 @@snip [HttpServerExampleSpec.scala]($test$/scala/docs/http/scaladsl/HttpServerExampleSpec.scala) { #long-routing-example }
 
 @@@
+
+## Getting started
+
+The project template in @scala[[Akka HTTP Quickstart for Scala](https://developer.lightbend.com/guides/akka-http-quickstart-scala/)]@java[[Akka HTTP Quickstart for Java](https://developer.lightbend.com/guides/akka-http-quickstart-java/)] will help you to get a working Akka HTTP server running.
+
+## Compared with Play framework routes
+
+If you have been using Play framework's routes file notation before this @ref[Play comparison](play-comparison.md) may help you to get started with Akka HTTP routing.
+
+<a name="interaction-with-akka-typed">
+## Interaction with Actors
+
+The following example shows how to use Akka HTTP with Akka Actors.
+
+We will create a small web server responsible to record build jobs with its state and duration, query jobs by
+id and status, and clear the job history.
+
+First let's start by defining the @apidoc[Behavior] that will act as a repository for the build job information. This isn't
+strictly needed for our sample, but just to have an actual actor to interact with:
+
+Scala
+:  @@snip [HttpServerWithActorsSample.scala]($test$/scala/docs/http/scaladsl/HttpServerWithActorsSample.scala) { #akka-typed-behavior }
+
+Java
+:  @@snip [JobRepository.scala](/docs/src/test/java/docs/http/javadsl/JobRepository.java) { #behavior }
+
+@@@ div { .group-scala }
+
+Then, let's define the JSON marshaller and unmarshallers for the HTTP routes:
+
+Scala
+:  @@snip [HttpServerWithActorsSample.scala]($test$/scala/docs/http/scaladsl/HttpServerWithActorsSample.scala) { #akka-typed-json }
+
+@@@
+
+Next step is to define the
+@scala[@scaladoc[Route](akka.http.scaladsl.server.index#Route=akka.http.scaladsl.server.RequestContext=%3Escala.concurrent.Future[akka.http.scaladsl.server.RouteResult])]
+@java[@javadoc[Route](akka.http.javadsl.server.Route)]
+that will communicate with the previously defined behavior
+and handle all its possible responses:
+
+Scala
+:  @@snip [HttpServerWithActorsSample.scala]($test$/scala/docs/http/scaladsl/HttpServerWithActorsSample.scala) { #akka-typed-route }
+
+Java
+:  @@snip [JobRoutes.scala](/docs/src/test/java/docs/http/javadsl/JobRoutes.java) { #route }
+
+Finally, we create a @apidoc[Behavior] that bootstraps the web server and use it as the root behavior of our actor system:
+
+Scala
+:  @@snip [HttpServerWithActorsSample.scala]($test$/scala/docs/http/scaladsl/HttpServerWithActorsSample.scala) { #akka-typed-bootstrap }
+
+Java
+:  @@snip [HttpServerWithActorsSample.java](/docs/src/test/java/docs/http/javadsl/HttpServerWithActorsSample.java) { #bootstrap }
 
 ## Dynamic Routing Example
 
@@ -115,7 +153,7 @@ is already taken by another application, or if the port is privileged (i.e. only
 In this case the "binding future" will fail immediately, and we can react to it by listening on the @scala[`Future`]@java[`CompletionStage`]'s completion:
 
 Scala
-:  @@snip [HttpServerExampleSpec.scala]($test$/scala/docs/http/scaladsl/HttpServerExampleSpec.scala) { #binding-failure-high-level-example }
+:  @@snip [HttpServerBindingFailure.scala]($test$/scala/docs/http/scaladsl/HttpServerBindingFailure.scala)
 
 Java
 :  @@snip [HighLevelServerBindFailureExample.java]($test$/java/docs/http/javadsl/server/HighLevelServerBindFailureExample.java) { #binding-failure-high-level-example }
@@ -127,11 +165,11 @@ refer to the @ref[Handling HTTP Server failures in the Low-Level API](../server-
 
 ### Failures and exceptions inside the Routing DSL
 
-Exception handling within the Routing DSL is done by providing @unidoc[ExceptionHandler] s which are documented in-depth
+Exception handling within the Routing DSL is done by providing @apidoc[ExceptionHandler] s which are documented in-depth
 in the @ref[Exception Handling](exception-handling.md) section of the documentation. You can use them to transform exceptions into
-@unidoc[HttpResponse] s with appropriate error codes and human-readable failure descriptions.
+@apidoc[HttpResponse] s with appropriate error codes and human-readable failure descriptions.
 
-### File uploads
+## File uploads
 
 For high level directives to handle uploads see the @ref[FileUploadDirectives](directives/file-upload-directives/index.md).
 

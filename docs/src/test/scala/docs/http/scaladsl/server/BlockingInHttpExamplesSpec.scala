@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package docs.http.scaladsl.server
@@ -7,11 +7,11 @@ package docs.http.scaladsl.server
 import akka.actor.ActorSystem
 import akka.http.scaladsl.server.{ Directives, Route }
 import docs.CompileOnlySpec
-import org.scalatest.WordSpec
 
 import scala.concurrent.Future
+import org.scalatest.wordspec.AnyWordSpec
 
-class BlockingInHttpExamplesSpec extends WordSpec with CompileOnlySpec
+class BlockingInHttpExamplesSpec extends AnyWordSpec with CompileOnlySpec
   with Directives {
 
   compileOnlySpec {

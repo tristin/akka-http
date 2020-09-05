@@ -1,13 +1,14 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.engine.http2
 
-import org.scalatest.{ Matchers, WordSpec }
 import org.scalatest.matchers.{ MatchResult, Matcher }
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
 
-class PriorityTreeSpec extends WordSpec with Matchers {
+class PriorityTreeSpec extends AnyWordSpec with Matchers {
   "PriorityTree" should {
     "contain only the root node if empty" in {
       PriorityTree() should printLike(
@@ -225,14 +226,14 @@ class PriorityTreeSpec extends WordSpec with Matchers {
   }
 
   def printLike(resultingTree: String): Matcher[PriorityTree] =
-    Matcher { tree ⇒
+    Matcher { tree =>
       val WithPotentialEndOfLineWhiteSpace = """(.*?)\s*""".r
       // The tree printer sometimes inserts blanks.
       def trimLines(str: String): String =
         str
           .split('\n')
           .map {
-            case WithPotentialEndOfLineWhiteSpace(line) ⇒ line
+            case WithPotentialEndOfLineWhiteSpace(line) => line
           }
           .mkString("\n")
           .trim

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2016-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.javadsl.model
@@ -10,21 +10,23 @@ import com.typesafe.config.{ Config, ConfigFactory }
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import org.scalatest.{ BeforeAndAfterAll, Inside, Matchers, WordSpec }
-import akka.stream.ActorMaterializer
+import org.scalatest.{ BeforeAndAfterAll, Inside }
 import akka.actor.ActorSystem
+import akka.stream.SystemMaterializer
 import akka.stream.javadsl.Source
 import akka.testkit._
 
 import scala.compat.java8.FutureConverters
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
 
-class MultipartsSpec extends WordSpec with Matchers with Inside with BeforeAndAfterAll {
+class MultipartsSpec extends AnyWordSpec with Matchers with Inside with BeforeAndAfterAll {
 
   val testConf: Config = ConfigFactory.parseString("""
   akka.event-handlers = ["akka.testkit.TestEventListener"]
   akka.loglevel = WARNING""")
   implicit val system = ActorSystem(getClass.getSimpleName, testConf)
-  implicit val materializer = ActorMaterializer()
+  val materializer = SystemMaterializer.get(system).materializer
   override def afterAll() = TestKit.shutdownActorSystem(system)
 
   "Multiparts.createFormDataFromParts" should {
@@ -36,7 +38,7 @@ class MultipartsSpec extends WordSpec with Matchers with Inside with BeforeAndAf
       val strict = Await.result(FutureConverters.toScala(strictCS), 1.second.dilated)
 
       strict shouldEqual akka.http.scaladsl.model.Multipart.FormData(
-        Map("foo" → akka.http.scaladsl.model.HttpEntity("FOO"), "bar" → akka.http.scaladsl.model.HttpEntity("BAR")))
+        Map("foo" -> akka.http.scaladsl.model.HttpEntity("FOO"), "bar" -> akka.http.scaladsl.model.HttpEntity("BAR")))
     }
     "create a model from Multiparts.createFormDataFromSourceParts" in {
       val streamed = Multiparts.createFormDataFromSourceParts(Source.from(util.Arrays.asList(
@@ -46,7 +48,7 @@ class MultipartsSpec extends WordSpec with Matchers with Inside with BeforeAndAf
       val strictCS = streamed.toStrict(1000, materializer)
       val strict = Await.result(FutureConverters.toScala(strictCS), 1.second.dilated)
       strict shouldEqual akka.http.scaladsl.model.Multipart.FormData(
-        Map("foo" → akka.http.scaladsl.model.HttpEntity("FOO"), "bar" → akka.http.scaladsl.model.HttpEntity("BAR")))
+        Map("foo" -> akka.http.scaladsl.model.HttpEntity("FOO"), "bar" -> akka.http.scaladsl.model.HttpEntity("BAR")))
     }
   }
 
@@ -59,7 +61,7 @@ class MultipartsSpec extends WordSpec with Matchers with Inside with BeforeAndAf
       val strict = Await.result(FutureConverters.toScala(strictCS), 1.second.dilated)
 
       strict shouldEqual akka.http.scaladsl.model.Multipart.FormData(
-        Map("foo" → akka.http.scaladsl.model.HttpEntity("FOO")))
+        Map("foo" -> akka.http.scaladsl.model.HttpEntity("FOO")))
     }
   }
 
@@ -71,7 +73,7 @@ class MultipartsSpec extends WordSpec with Matchers with Inside with BeforeAndAf
       val strict = streamed
 
       strict shouldEqual akka.http.scaladsl.model.Multipart.FormData(
-        Map("foo" → akka.http.scaladsl.model.HttpEntity("FOO"), "bar" → akka.http.scaladsl.model.HttpEntity("BAR")))
+        Map("foo" -> akka.http.scaladsl.model.HttpEntity("FOO"), "bar" -> akka.http.scaladsl.model.HttpEntity("BAR")))
     }
   }
 }

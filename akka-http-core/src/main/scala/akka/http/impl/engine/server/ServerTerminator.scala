@@ -1,29 +1,27 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.engine.server
 
 import java.util.concurrent.atomic.AtomicReference
 
-import akka.Done
-import akka.actor.{ ActorSystem, Terminated }
-import akka.annotation.{ DoNotInherit, InternalApi }
+import akka.actor.ActorSystem
+import akka.annotation.InternalApi
 import akka.event.LoggingAdapter
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.Http.{ HttpConnectionTerminated, HttpServerTerminated, HttpTerminated }
-import akka.http.scaladsl.settings.{ RoutingSettings, ServerSettings }
-import akka.http.scaladsl.model.{ HttpRequest, HttpResponse, StatusCodes }
-import akka.stream.scaladsl.BidiFlow
-
-import scala.concurrent.duration._
+import akka.http.scaladsl.model.headers.Connection
+import akka.http.scaladsl.model.{ HttpRequest, HttpResponse }
+import akka.http.scaladsl.settings.ServerSettings
 import akka.stream._
+import akka.stream.scaladsl.BidiFlow
 import akka.stream.stage._
 import akka.util.PrettyDuration
 
 import scala.annotation.tailrec
-import scala.concurrent.{ ExecutionContext, Future, Promise }
 import scala.concurrent.duration.{ Deadline, FiniteDuration }
+import scala.concurrent.{ ExecutionContext, Future, Promise }
 import scala.util.{ Failure, Success }
 
 /**
@@ -67,13 +65,35 @@ private[http] final class MasterServerTerminator(log: LoggingAdapter) extends Se
    */
   @tailrec def registerConnection(terminator: ServerTerminator)(implicit ec: ExecutionContext): Boolean = {
     terminators.get() match {
-      case v @ AliveConnectionTerminators(ts) ⇒
+      case v @ AliveConnectionTerminators(ts) =>
         terminators.compareAndSet(v, v.copy(ts = ts + terminator)) ||
           registerConnection(terminator) // retry
 
-      case Terminating(deadline) ⇒
+      case Terminating(deadline) =>
         terminator.terminate(deadline.timeLeft)(ec)
         false // termination is in progress already, we did not register but immediately issue termination
+    }
+  }
+
+  /**
+   * Removes a previously registered per-connection terminator.
+   * Terminators must remove themselves like this once their respective connection is closed,
+   * otherwise they would leak and remain in the set indefinitely.
+   *
+   * @return true if the terminator has been successfully removed.
+   */
+  @tailrec def removeConnection(terminator: ServerTerminator): Unit = {
+    terminators.get() match {
+      case v @ AliveConnectionTerminators(ts) =>
+        if (!terminators.compareAndSet(v, v.copy(ts = ts - terminator)))
+          removeConnection(terminator) // retry
+
+      case _: Terminating =>
+      // the `terminator` that we are being called with can only be one that already was registered,
+      // due to the register call happening during materialization, and the remove call happening during
+      // connection stream completion. Since we are in Terminating state, this means `terminate()` was called,
+      // and all existing terminators were invoked to `terminate()`. So if this is an existing one, we must not call
+      // terminate on it, as it would be the 2nd invocation.
     }
   }
 
@@ -81,25 +101,31 @@ private[http] final class MasterServerTerminator(log: LoggingAdapter) extends Se
   // since termination also implies unbinding such new connections should not really happen).
   def terminate(timeout: FiniteDuration)(implicit ex: ExecutionContext): Future[HttpTerminated] = {
     terminators.get() match {
-      case v @ AliveConnectionTerminators(emptyTs) if emptyTs.isEmpty ⇒
+      case v @ AliveConnectionTerminators(emptyTs) if emptyTs.isEmpty =>
         if (terminators.compareAndSet(v, Terminating(timeout.fromNow))) {
           // no connections exist to be terminated, and if some arrive after us, they will see the Terminating and terminate
           termination.trySuccess(HttpServerTerminated)
           termination.future
         } else terminate(timeout)(ex) // retry
 
-      case v @ AliveConnectionTerminators(ts) ⇒
+      case v @ AliveConnectionTerminators(ts) =>
         if (terminators.compareAndSet(v, Terminating(timeout.fromNow))) {
           // cause the termination for all connections
-          val connectionsTerminated = Future.sequence(ts.map { t ⇒
-            t.terminate(timeout)
+          val connectionsTerminated = Future.sequence(ts.map { t =>
+            // termination in general always succeeds, but we make sure here in order
+            // to not accidentally short-circuit terminating the other connection-terminators -- all must be terminated
+            t.terminate(timeout).recover {
+              case ex =>
+                log.warning("Ignoring termination failure of {}, failure was: {}", t, ex.getMessage)
+                HttpServerTerminated
+            }
           })
-          val serverTerminated = connectionsTerminated.map(_ ⇒ HttpServerTerminated)
+          val serverTerminated = connectionsTerminated.map(_ => HttpServerTerminated)
           termination.completeWith(serverTerminated)
           termination.future
         } else terminate(timeout)(ex) // retry
 
-      case Terminating(existingDeadline) ⇒
+      case Terminating(existingDeadline) =>
         log.warning(s"Issued terminate($timeout) while termination is in progress already (with deadline: time left: ${PrettyDuration.format(existingDeadline.timeLeft)}")
         termination.future
     }
@@ -149,16 +175,16 @@ private[http] final class GracefulTerminatorStage(settings: ServerSettings)
 
   final val TerminationDeadlineTimerKey = "TerminationDeadlineTimerKey"
 
-  final class ConnectionTerminator(triggerTermination: Promise[FiniteDuration ⇒ Future[HttpTerminated]]) extends ServerTerminator {
+  final class ConnectionTerminator(triggerTermination: Promise[FiniteDuration => Future[HttpTerminated]]) extends ServerTerminator {
     override def terminate(deadline: FiniteDuration)(implicit ec: ExecutionContext): Future[HttpTerminated] = {
-      triggerTermination.future.flatMap(callback ⇒ {
+      triggerTermination.future.flatMap(callback => {
         callback(deadline)
       })
     }
   }
 
   override def createLogicAndMaterializedValue(inheritedAttributes: Attributes): (GraphStageLogic, ServerTerminator) = {
-    val triggerTermination = Promise[FiniteDuration ⇒ Future[HttpTerminated]]() // result here means termination of this connection has completed
+    val triggerTermination = Promise[FiniteDuration => Future[HttpTerminated]]() // result here means termination of this connection has completed
 
     // responsible for terminating this connection
     val selfTerminator = new ConnectionTerminator(triggerTermination)
@@ -172,7 +198,7 @@ private[http] final class GracefulTerminatorStage(settings: ServerSettings)
 
       // error callback, in case an asynchronous operation needs to pipe back a failure back to this stage
       // this could happen during draining of incoming http requests during termination phase for example
-      lazy val failureCallback: AsyncCallback[Throwable] = getAsyncCallback((ex: Throwable) ⇒ failStage(ex))
+      lazy val failureCallback: AsyncCallback[Throwable] = getAsyncCallback((ex: Throwable) => failStage(ex))
 
       // true, if a request was delivered to the user-handler, and no response was sent yet
       // in that case, if the termination timeout triggers, we will need to render a synthetic response to the client.
@@ -180,7 +206,7 @@ private[http] final class GracefulTerminatorStage(settings: ServerSettings)
       var pendingTerminationResponse: Boolean = false
 
       override def preStart(): Unit = {
-        val terminateSignal = getAsyncCallback[FiniteDuration] { deadline ⇒
+        val terminateSignal = getAsyncCallback[FiniteDuration] { deadline =>
           log.debug("[terminator] Initializing termination of server, deadline: {}", PrettyDuration.format(deadline))
           installTerminationHandlers(deadline.fromNow)
 
@@ -191,7 +217,7 @@ private[http] final class GracefulTerminatorStage(settings: ServerSettings)
         val _ = failureCallback
 
         // this way we expose the termination signal invocation to the external world, in a type safe fashion
-        triggerTermination.success { d ⇒
+        triggerTermination.success { d =>
           terminateSignal.invoke(d)
           terminationOfConnectionDone.future // will be completed once termination has completed (in postStop)
         }
@@ -202,6 +228,11 @@ private[http] final class GracefulTerminatorStage(settings: ServerSettings)
           val response = grab(fromUser)
           pendingUserHandlerResponse = false
           push(toNet, response)
+        }
+
+        override def onUpstreamFinish(): Unit = {
+          // don't finish the whole bidi stage, just propagate the completion:
+          complete(toNet)
         }
       })
       setHandler(toUser, new OutHandler {
@@ -216,6 +247,11 @@ private[http] final class GracefulTerminatorStage(settings: ServerSettings)
           pendingUserHandlerResponse = true
           push(toUser, request)
         }
+
+        override def onUpstreamFinish(): Unit = {
+          // don't finish the whole bidi stage, just propagate the completion:
+          complete(toUser)
+        }
       })
       setHandler(toNet, new OutHandler {
         override def onPull(): Unit = {
@@ -224,7 +260,9 @@ private[http] final class GracefulTerminatorStage(settings: ServerSettings)
       })
 
       def installTerminationHandlers(deadline: Deadline): Unit = {
-        // we may need to inject a termination response
+        // when no inflight requests, complete stage right away
+        if (!pendingUserHandlerResponse) completeStage()
+
         setHandler(fromUser, new InHandler {
           override def onPush(): Unit = {
             val overdue = deadline.isOverdue()
@@ -235,7 +273,9 @@ private[http] final class GracefulTerminatorStage(settings: ServerSettings)
               } else grab(fromUser)
 
             pendingUserHandlerResponse = false
-            push(toNet, response)
+
+            // send response to pending in-flight request with Connection: close, and complete stage
+            emit(toNet, response.withHeaders(Connection("close")), () => completeStage())
           }
         })
 
@@ -257,15 +297,15 @@ private[http] final class GracefulTerminatorStage(settings: ServerSettings)
             // on purpose discard all incoming bytes for requests
             // could discard with the deadline.timeLeft completion timeout, but not necessarily needed
             request.entity.discardBytes()(interpreter.subFusingMaterializer).future.onComplete {
-              case Success(_) ⇒ // ignore
-              case Failure(ex) ⇒
+              case Success(_) => // ignore
+              case Failure(ex) =>
                 // we do want to cause this failure to fail the termination eagerly
                 failureCallback.invoke(ex)
             }(interpreter.materializer.executionContext)
 
             // we can reply right away with an termination response since user handler will never emit a response anymore
-            push(toNet, settings.terminationDeadlineExceededResponse)
-            pull(fromNet)
+            push(toNet, settings.terminationDeadlineExceededResponse.withHeaders(Connection("close")))
+            completeStage()
           }
         })
 
@@ -287,16 +327,16 @@ private[http] final class GracefulTerminatorStage(settings: ServerSettings)
       }
 
       override protected def onTimer(timerKey: Any): Unit = timerKey match {
-        case TerminationDeadlineTimerKey ⇒
+        case TerminationDeadlineTimerKey =>
           val ex = new ServerTerminationDeadlineReached
           if (pendingUserHandlerResponse) {
             // sending the reply here is a "nice to try", but the stage failure will likely overtake it and terminate the connection first
-            emit(toNet, settings.terminationDeadlineExceededResponse, () ⇒ failStage(ex))
+            emit(toNet, settings.terminationDeadlineExceededResponse, () => failStage(ex))
           } else {
             failStage(ex)
           }
 
-        case unexpected ⇒
+        case unexpected =>
           // should not happen
           throw new IllegalArgumentException(s"Unexpected timer key [$unexpected] in ${getClass.getName}!")
       }
@@ -308,6 +348,6 @@ private[http] final class GracefulTerminatorStage(settings: ServerSettings)
       }
     }
 
-    logic → selfTerminator
+    logic -> selfTerminator
   }
 }

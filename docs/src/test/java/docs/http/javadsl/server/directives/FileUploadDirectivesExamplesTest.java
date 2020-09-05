@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2016-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package docs.http.javadsl.server.directives;
@@ -15,6 +15,7 @@ import akka.stream.javadsl.Source;
 import akka.util.ByteString;
 import org.junit.Ignore;
 import org.junit.Test;
+import scala.concurrent.duration.FiniteDuration;
 
 import java.io.File;
 import java.nio.charset.Charset;
@@ -25,16 +26,12 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
 import static scala.compat.java8.JFunction.func;
 
-//#uploadedFile
-import static akka.http.javadsl.server.Directives.complete;
-import static akka.http.javadsl.server.Directives.uploadedFile;
-
-//#uploadedFile
 //#storeUploadedFile
 import static akka.http.javadsl.server.Directives.complete;
 import static akka.http.javadsl.server.Directives.storeUploadedFile;
@@ -60,32 +57,9 @@ import static akka.http.javadsl.server.Directives.onSuccess;
 
 public class FileUploadDirectivesExamplesTest extends JUnitRouteTest {
 
-  @Test
-  public void testUploadedFile() {
-    //#uploadedFile
-    final Route route = uploadedFile("csv", (info, file) -> {
-      // do something with the file and file metadata ...
-      if (file.delete())
-        return complete(StatusCodes.OK);
-      else
-        return complete(StatusCodes.INTERNAL_SERVER_ERROR);
-    });
-
-    Map<String, String> filenameMapping = new HashMap<>();
-    filenameMapping.put("filename", "primes.csv");
-
-    akka.http.javadsl.model.Multipart.FormData multipartForm =
-      Multiparts.createStrictFormDataFromParts(Multiparts.createFormDataBodyPartStrict("csv",
-        HttpEntities.create(ContentTypes.TEXT_PLAIN_UTF8,
-          "2,3,5\n7,11,13,17,23\n29,31,37\n"), filenameMapping));
-
-    // test:
-    testRoute(route).run(HttpRequest.POST("/")
-      .withEntity(
-        multipartForm.toEntity(BodyPartRenderer
-		  .randomBoundaryWithDefaults())))
-      .assertStatusCode(StatusCodes.OK);
-    //#uploadedFile
+  @Override
+  public FiniteDuration defaultAwaitDuration() {
+    return new FiniteDuration(7, TimeUnit.SECONDS);
   }
 
   @Test

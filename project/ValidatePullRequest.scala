@@ -1,13 +1,12 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka
 
 import java.io._
 
-import akka.MimaWithPrValidation.MimaResult
-import akka.MimaWithPrValidation.Problems
+import akka.MimaWithPrValidation.{MimaResult, NoErrors, Problems}
 import net.virtualvoid.sbt.graph.ModuleGraph
 import net.virtualvoid.sbt.graph.backend.SbtUpdateReport
 import org.kohsuke.github.GHIssueComment
@@ -50,7 +49,7 @@ object ValidatePullRequest extends AutoPlugin {
   case object BuildQuick extends BuildMode {
     override def task = Some(executeTests in ValidatePR)
     def log(projectName: String, l: Logger) =
-      l.info(s"Building [$projectName] in quick mode, as it's dependencies were affected by PR.")
+      l.info(s"Building [$projectName] in quick mode, as its dependencies were affected by PR.")
   }
 
   case object BuildProjectChangedQuick extends BuildMode {
@@ -97,7 +96,7 @@ object ValidatePullRequest extends AutoPlugin {
   // running validation
   val validatePullRequest = taskKey[Unit]("Validate pull request and report aggregated results")
   val executePullRequestValidation = taskKey[Seq[KeyValue[Result[Any]]]]("Run pull request per project")
-  val additionalTasks = taskKey[Seq[TaskKey[_]]]("Additional tasks for pull request validation")
+  val additionalTasks = settingKey[Seq[TaskKey[_]]]("Additional tasks for pull request validation")
 
   // The set of (top-level) files or directories to watch for build changes.
   val BuildFilesAndDirectories = Set("project", "build.sbt")
@@ -107,7 +106,7 @@ object ValidatePullRequest extends AutoPlugin {
     graphsToTest exists { case (ivyScope, deps) =>
       log.debug(s"Analysing [$ivyScope] scoped dependencies...")
 
-      deps.nodes.foreach { m ⇒ log.debug(" -> " + m.id) }
+      deps.nodes.foreach { m => log.debug(" -> " + m.id) }
 
       // if this project depends on a modified module, we must test it
       deps.nodes.exists { m =>
@@ -180,7 +179,7 @@ object ValidatePullRequest extends AutoPlugin {
               l.startsWith("docs") ||
               BuildFilesAndDirectories.exists(l startsWith)
           )
-          .map(l ⇒ l.takeWhile(_ != '/'))
+          .map(l => l.takeWhile(_ != '/'))
           .toSet
 
       val dirtyModuleNames: Set[String] =
@@ -188,11 +187,11 @@ object ValidatePullRequest extends AutoPlugin {
         else {
           val statusOutput = s"git status --short".!!.split("\n")
           val dirtyDirectories = statusOutput
-            .map(l ⇒ l.trim.dropWhile(_ != ' ').drop(1))
+            .map(l => l.trim.dropWhile(_ != ' ').drop(1))
             .map(_.takeWhile(_ != '/'))
             .filter(dir => dir.startsWith("akka-") || dir.startsWith("docs") || BuildFilesAndDirectories.contains(dir))
             .toSet
-          log.info("Detected uncomitted changes in directories (including in dependency analysis): " + dirtyDirectories.mkString("[", ",", "]"))
+          log.info("Detected uncommitted changes in directories (including in dependency analysis): " + dirtyDirectories.mkString("[", ",", "]"))
           dirtyDirectories
         }
 
@@ -223,11 +222,11 @@ object ValidatePullRequest extends AutoPlugin {
           changedDirs,
           name.value,
           Seq(
-            graphFor((update in Compile).value, Compile),
-            graphFor((update in Test).value, Test),
-            graphFor((update in Runtime).value, Runtime),
-            graphFor((update in Provided).value, Provided),
-            graphFor((update in Optional).value, Optional)))(log)
+            graphFor((updateFull in Compile).value, Compile),
+            graphFor((updateFull in Test).value, Test),
+            graphFor((updateFull in Runtime).value, Runtime),
+            graphFor((updateFull in Provided).value, Provided),
+            graphFor((updateFull in Optional).value, Optional)))(log)
       }
 
       if (githubCommandEnforcedBuildAll.isDefined)
@@ -338,11 +337,24 @@ object AggregatePRValidation extends AutoPlugin {
 
       val (newState, result) = runAggregated(executePullRequestValidation in extracted.currentRef, state.value)
 
-      val allResults = result.toEither.right.get.flatMap(_.value.toEither.right.get).filterNot(_.key == null).sortBy(_.key.scope.project.toString)
+      implicit class AddBetterEitherError[T](val e: Either[sbt.Incomplete, T]) {
+        def getSafe: T = e match {
+          case Left(i) => throw new IllegalStateException(s"Was not Right but [$i]", i.directCause.getOrElse(null))
+          case Right(t) => t
+        }
+      }
+
+      val allResults =
+        result
+          .toEither.getSafe
+          .flatMap(_.value.toEither.getSafe)
+          .filterNot(_.key == null)
+          .sortBy(_.key.scope.project.toString)
 
       val onlyTestResults: Seq[KeyValue[Tests.Output]] = allResults collect {
         case KeyValue(key, Value(o: Tests.Output)) => KeyValue(key, o)
       }
+      val (passed0, failed) = onlyTestResults.partition(_.value.overall == TestResult.Passed)
 
       val failedTasks: Seq[KeyValue[Inc]] = allResults collect {
         case KeyValue(key, i: Inc) => KeyValue(key, i)
@@ -364,103 +376,99 @@ object AggregatePRValidation extends AutoPlugin {
       LogExchange.bindLoggerAppenders("testLogger", appender -> Level.Info :: Nil)
 
       log.info("")
-      write("")
-      write("# Pull request validation report")
-      write("")
-
-      def showKey(key: ScopedKey[_]): String = Project.showContextKey(extracted.session, extracted.structure).show(key)//Project.showContextKey(newState).show(key)
-
-      def totalCount(suiteResult: SuiteResult): Int = {
-        import suiteResult._
-        passedCount + failureCount + errorCount + skippedCount + ignoredCount + canceledCount + pendingCount
-      }
-      def hasExecutedTests(suiteResult: SuiteResult): Boolean = totalCount(suiteResult) > 0
-      def hasTests(result: Tests.Output): Boolean = result.events.exists(e => hasExecutedTests(e._2))
-      def printTestResults(result: KeyValue[Tests.Output]): Unit = {
-        write(s"Test result for '${showKey(result.key)}'")
+      if (failed.nonEmpty || mimaFailures.nonEmpty || failedTasks.nonEmpty) {
         write("")
-        write("```")
-
-        def safeLogTestResults(logger: Logger): Unit =
-          Try(TestResultLogger.Default.run(logger, result.value, showKey(result.key)))
-
-        // HACK: there is no logger which would both log to our file and the console, so we log twice
-        safeLogTestResults(log)
-        safeLogTestResults(testLogger)
-
-        // there seems to be some async logging going on, so let's wait for a while to be sure the appender has flushed
-        Thread.sleep(100)
-
-        write("```")
+        write("## Pull request validation report")
         write("")
-      }
 
-      val (passed0, failed) = onlyTestResults.partition(_.value.overall == TestResult.Passed)
-      val passed = passed0.filter(t => hasTests(t.value))
+        def showKey(key: ScopedKey[_]): String = Project.showContextKey2(extracted.session).show(key)
 
-      if (failed.nonEmpty) {
-        write("## Failed Test Suites")
-        write("")
-        failed.foreach(printTestResults)
-        write("")
-      }
-
-      if (mimaFailures.nonEmpty) {
-        write("## Mima Failures")
-        write("")
-        write("```")
-        mimaFailures.foreach {
-          case KeyValue(key, Problems(desc)) =>
-            write(s"Problems for ${key.scope.project.toOption.get.asInstanceOf[ProjectRef].project}:\n$desc")
-            write("")
+        def totalCount(suiteResult: SuiteResult): Int = {
+          import suiteResult._
+          passedCount + failureCount + errorCount + skippedCount + ignoredCount + canceledCount + pendingCount
         }
-        write("```")
-        write("")
-      }
 
-      if (failedTasks.nonEmpty) {
-        write("## Other Failed tasks")
-        write("")
-        failedTasks foreach { case KeyValue(key, Inc(inc: Incomplete)) =>
-          def parseIncomplete(inc: Incomplete): String =
-            "an underlying problem during task execution:\n" +
-            Incomplete.linearize(inc).filter(x => x.message.isDefined || x.directCause.isDefined)
-              .map { case i @ Incomplete(node, tpe, message, causes, directCause) =>
-                def nodeName: String = node match {
-                  case Some(key: ScopedKey[_]) => showKey(key)
-                  case Some(t: Task[_]) =>
-                    t.info.name
-                      .orElse(t.info.attributes.get(taskDefinitionKey).map(showKey))
-                      .getOrElse(t.info.toString)
-                  case Some(x) => s"<$x>"
-                  case None => "<unknown>"
-                }
+        def hasExecutedTests(suiteResult: SuiteResult): Boolean = totalCount(suiteResult) > 0
 
-                s"  $nodeName: ${message.orElse(directCause.map(_.toString)).getOrElse(s"<unknown: ($i)>")}"
-              }.mkString("\n")
+        def hasTests(result: Tests.Output): Boolean = result.events.exists(e => hasExecutedTests(e._2))
 
-          val problem = inc.directCause.map(_.toString).getOrElse(parseIncomplete(inc))
+        def printTestResults(result: KeyValue[Tests.Output]): Unit = {
+          write(s"Test result for `${showKey(result.key)}`")
+          write("")
+          write("```")
 
-          write(s"${showKey(key)} failed because of $problem")
+          def safeLogTestResults(logger: Logger): Unit =
+            Try(TestResultLogger.Default.run(logger, result.value, showKey(result.key)))
+
+          // HACK: there is no logger which would both log to our file and the console, so we log twice
+          safeLogTestResults(log)
+          safeLogTestResults(testLogger)
+
+          // there seems to be some async logging going on, so let's wait for a while to be sure the appender has flushed
+          Thread.sleep(100)
+
+          write("```")
           write("")
         }
+
+        val passed = passed0.filter(t => hasTests(t.value))
+
+        if (failed.nonEmpty) {
+          write("<details><summary>Failed Test Suites</summary>")
+          write("")
+          failed.foreach(printTestResults)
+          write("</details>")
+        }
+
+        if (mimaFailures.nonEmpty) {
+          write("<details><summary>Mima Failures</summary>")
+          write("")
+          write("```")
+          mimaFailures.foreach {
+            case KeyValue(key, Problems(desc)) =>
+              write(s"Problems for `${key.scope.project.toOption.get.asInstanceOf[ProjectRef].project}`:\n$desc")
+              write("")
+            case KeyValue(_, NoErrors) =>
+          }
+          write("```")
+          write("</details>")
+        }
+
+        if (failedTasks.nonEmpty) {
+          write("<details><summary>Other Failed Tasks</summary>")
+          write("")
+          failedTasks foreach { case KeyValue(key, Inc(inc: Incomplete)) =>
+            def parseIncomplete(inc: Incomplete): String =
+              "an underlying problem during task execution:\n" +
+              Incomplete.linearize(inc).filter(x => x.message.isDefined || x.directCause.isDefined)
+                .map { case i @ Incomplete(node, tpe, message, causes, directCause) =>
+                  def nodeName: String = node match {
+                    case Some(key: ScopedKey[_]) => showKey(key)
+                    case Some(t: Task[_]) =>
+                      t.info.name
+                        .orElse(t.info.attributes.get(taskDefinitionKey).map(showKey))
+                        .getOrElse(t.info.toString)
+                    case Some(x) => s"<$x>"
+                    case None => "<unknown>"
+                  }
+
+                  s"  $nodeName: ${message.orElse(directCause.map(_.toString)).getOrElse(s"<unknown: ($i)>")}"
+                }.mkString("```\n", "\n", "\n```\n")
+
+            val problem = inc.directCause.map(_.toString).getOrElse(parseIncomplete(inc))
+
+            write(s"`${showKey(key)}` failed because of $problem")
+          }
+          write("</details>")
+        }
       }
-
-      /*if (passed.nonEmpty) {
-        write("+ Successful Test Suites")
-        write("")
-
-        passed.foreach(printTestResults)
-        write("")
-      }*/
-
-      write("")
 
       fw.close()
       log.info(s"Wrote PR validation report to ${outputFile.getAbsolutePath}")
-      //write(s"Overall result was: $result")
 
-      if (failed.nonEmpty || mimaFailures.nonEmpty || failedTasks.nonEmpty) throw new RuntimeException("Pull request validation failed!")
+      if (failed.nonEmpty) throw new RuntimeException(s"Pull request validation failed! Tests failed: $failed")
+      else if (mimaFailures.nonEmpty) throw new RuntimeException(s"Pull request validation failed! Mima failures: $mimaFailures")
+      else if (failedTasks.nonEmpty) throw new RuntimeException(s"Pull request validation failed! Failed tasks: $failedTasks")
       ()
     }
   )
@@ -498,14 +506,13 @@ object MimaWithPrValidation extends AutoPlugin {
         // filters * found is n-squared, it's fixable in principle by special-casing known
         // filter types or something, not worth it most likely...
 
-        // version string "x.y.z" is converted to an Int tuple (x, y, z) for comparison
-        val versionOrdering = Ordering[(Int, Int, Int)].on { version: String =>
-          val ModuleVersion = """(\d+)\.(\d+)\.(.*)""".r
-          val ModuleVersion(epoch, major, minor) = version
-          val toNumeric = (revision: String) => Try(revision.filter(_.isDigit).toInt).getOrElse(0)
-          (toNumeric(epoch), toNumeric(major), toNumeric(minor))
+        val versionOrdering = {
+          // version string "x.y.z" is converted to an Int tuple (x, y, z) for comparison
+          val VersionRegex = """(\d+)\.?(\d+)?\.?(.*)?""".r
+          def int(versionPart: String) =
+            Try(versionPart.replace("x", Short.MaxValue.toString).filter(_.isDigit).toInt).getOrElse(0)
+          Ordering[(Int, Int, Int)].on[String] { case VersionRegex(x, y, z) => (int(x), int(y), int(z)) }
         }
-
         def isReported(module: ModuleID, verionedFilters: Map[String, Seq[core.ProblemFilter]])(problem: core.Problem) = (verionedFilters.collect {
           // get all filters that apply to given module version or any version after it
           case f @ (version, filters) if versionOrdering.gteq(version, module.revision) => filters
@@ -557,7 +564,7 @@ object MimaWithPrValidation extends AutoPlugin {
               mimaCurrentClassfiles.value,
               (fullClasspath in mimaFindBinaryIssues).value,
               mimaCheckDirection.value,
-              streams.value
+              new SbtLogger(streams.value)
             )
 
             val binary = mimaBinaryIssueFilters.value

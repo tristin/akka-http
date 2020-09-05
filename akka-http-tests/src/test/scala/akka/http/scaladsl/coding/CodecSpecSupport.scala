@@ -1,20 +1,21 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.coding
 
-import org.scalatest.{ BeforeAndAfterAll, Matchers, Suite }
+import org.scalatest.{ BeforeAndAfterAll, Suite }
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import akka.testkit.TestKit
 import akka.util.ByteString
+import org.scalatest.matchers.should.Matchers
 
-trait CodecSpecSupport extends Matchers with BeforeAndAfterAll { self: Suite ⇒
+trait CodecSpecSupport extends Matchers with BeforeAndAfterAll { self: Suite =>
 
   def readAs(string: String, charset: String = "UTF8") = equal(string).matcher[String] compose { (_: ByteString).decodeString(charset) }
   def hexDump(bytes: ByteString) = bytes.map("%02x".format(_)).mkString
-  def fromHexDump(dump: String) = dump.grouped(2).toArray.map(chars ⇒ Integer.parseInt(new String(chars), 16).toByte)
+  def fromHexDump(dump: String) = dump.grouped(2).toArray.map(chars => Integer.parseInt(new String(chars), 16).toByte)
 
   def printBytes(i: Int, id: String) = {
     def byte(i: Int) = (i & 0xFF).toHexString

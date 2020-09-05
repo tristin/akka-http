@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package docs
@@ -10,13 +10,15 @@ import akka.annotation.ApiMayChange
 import org.reflections.Reflections
 import org.reflections.scanners.{ MethodAnnotationsScanner, TypeAnnotationsScanner }
 import org.reflections.util.{ ClasspathHelper, ConfigurationBuilder }
-import org.scalatest.{ Matchers, WordSpec, Assertion }
+import org.scalatest.Assertion
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.io.Source
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
 
-class ApiMayChangeDocCheckerSpec extends WordSpec with Matchers {
+class ApiMayChangeDocCheckerSpec extends AnyWordSpec with Matchers {
 
   def prettifyName(clazz: Class[_]): String = {
     clazz.getCanonicalName.replaceAll("\\$minus", "-").split("\\$")(0)

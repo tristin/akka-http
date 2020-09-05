@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.server
@@ -16,14 +16,16 @@ import akka.stream.scaladsl.{ Sink, Source }
 import akka.stream.testkit.Utils.assertAllStagesStopped
 import akka.testkit.TestKit
 import com.typesafe.config.ConfigFactory
-import org.scalatest.{ BeforeAndAfterAll, Matchers, WordSpecLike }
+import org.scalatest.BeforeAndAfterAll
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.util.{ Failure, Success, Try }
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpecLike
 
 abstract class DontLeakActorsOnFailingConnectionSpecs(poolImplementation: String)
-  extends WordSpecLike with Matchers with BeforeAndAfterAll with WithLogCapturing {
+  extends AnyWordSpecLike with Matchers with BeforeAndAfterAll with WithLogCapturing {
 
   val config = ConfigFactory.parseString(s"""
     akka {
@@ -32,6 +34,8 @@ abstract class DontLeakActorsOnFailingConnectionSpecs(poolImplementation: String
       loggers = ["akka.http.impl.util.SilenceAllTestEventListener"]
 
       http.host-connection-pool.pool-implementation = $poolImplementation
+
+      http.host-connection-pool.base-connection-backoff = 0 ms
     }""").withFallback(ConfigFactory.load())
   implicit val system = ActorSystem("DontLeakActorsOnFailingConnectionSpecs-" + poolImplementation, config)
   implicit val materializer = ActorMaterializer()
@@ -49,11 +53,11 @@ abstract class DontLeakActorsOnFailingConnectionSpecs(poolImplementation: String
         val host = "127.0.0.1"
         val port = 86 // (Micro Focus Cobol) unlikely to be used port in the "system ports" range
         val source = Source(1 to reqsCount)
-          .map(i ⇒ HttpRequest(uri = Uri(s"http://$host:$port/test/$i")) → i)
+          .map(i => HttpRequest(uri = Uri(s"http://$host:$port/test/$i")) -> i)
 
         val countDown = new CountDownLatch(reqsCount)
         val sink = Sink.foreach[(Try[HttpResponse], Int)] {
-          case (resp, id) ⇒
+          case (resp, id) =>
             countDown.countDown()
             handleResponse(resp, id)
         }
@@ -67,11 +71,11 @@ abstract class DontLeakActorsOnFailingConnectionSpecs(poolImplementation: String
 
   private def handleResponse(httpResp: Try[HttpResponse], id: Int): Unit = {
     httpResp match {
-      case Success(httpRes) ⇒
+      case Success(httpRes) =>
         system.log.error(s"$id: OK: (${httpRes.status.intValue}")
         httpRes.entity.dataBytes.runWith(Sink.ignore)
 
-      case Failure(ex) ⇒
+      case Failure(ex) =>
         system.log.debug(s"$id: FAIL $ex") // this is what we expect
     }
   }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2017-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.engine.server
@@ -23,13 +23,14 @@ class PrepareRequestsSpec extends AkkaSpec {
       HttpMethods.GET,
       Uri("http://example.com/"),
       HttpProtocols.`HTTP/1.1`,
+      Map.empty,
       List(),
-      StreamedEntityCreator[ParserOutput, RequestEntity] { entityChunks ⇒
+      StreamedEntityCreator[ParserOutput, RequestEntity] { entityChunks =>
         val chunks = entityChunks.collect {
-          case EntityChunk(chunk)      ⇒ chunk
-          case EntityStreamError(info) ⇒ throw EntityStreamException(info)
+          case EntityChunk(chunk)      => chunk
+          case EntityStreamError(info) => throw EntityStreamException(info)
         }
-        HttpEntity.Chunked(ContentTypes.`application/octet-stream`, HttpEntity.limitableChunkSource(chunks))
+        HttpEntity.Chunked(ContentTypes.`application/octet-stream`, chunks)
       },
       expect100Continue = true,
       closeRequested = false)
@@ -45,6 +46,7 @@ class PrepareRequestsSpec extends AkkaSpec {
       HttpMethods.GET,
       Uri("http://example.com/"),
       HttpProtocols.`HTTP/1.1`,
+      Map.empty,
       List(),
       StrictEntityCreator(HttpEntity.Strict(ContentTypes.`application/octet-stream`, ByteString("body"))),
       true,

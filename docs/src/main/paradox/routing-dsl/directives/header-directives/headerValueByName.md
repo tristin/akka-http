@@ -4,7 +4,7 @@
 
 ## Signature
 
-@@signature [HeaderDirectives.scala]($akka-http$/akka-http/src/main/scala/akka/http/scaladsl/server/directives/HeaderDirectives.scala) { #headerValueByName }
+@@signature [HeaderDirectives.scala](/akka-http/src/main/scala/akka/http/scaladsl/server/directives/HeaderDirectives.scala) { #headerValueByName }
 
 @@@
 
@@ -12,8 +12,8 @@
 
 Extracts the value of the HTTP request header with the given name.
 
-@scala[The name can be given as a `String` or as a `Symbol`. ]If no header with a matching name is found the request
-is rejected with a @unidoc[MissingHeaderRejection].
+If no header with a matching name is found the request
+is rejected with a @apidoc[MissingHeaderRejection].
 
 If the header is expected to be missing in some cases or to customize
 handling when the header is missing use the @ref[optionalHeaderValueByName](optionalHeaderValueByName.md) directive instead.

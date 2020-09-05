@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.javadsl.model
@@ -8,11 +8,12 @@ import java.util.Optional
 
 import akka.japi.Pair
 
-import org.scalatest.{ FreeSpec, MustMatchers }
-
 import scala.collection.JavaConverters._
+import scala.collection.mutable
+import org.scalatest.freespec.AnyFreeSpec
+import org.scalatest.matchers.must.Matchers
 
-class JavaApiSpec extends FreeSpec with MustMatchers {
+class JavaApiSpec extends AnyFreeSpec with Matchers {
   "The Java API should work for" - {
     "work with Uris" - {
       "query" in {
@@ -46,16 +47,16 @@ class JavaApiSpec extends FreeSpec with MustMatchers {
       }
       "access parameterMap" in {
         Uri.create("/abc?name=blub&age=28")
-          .query().toMap.asScala must contain allOf ("name" → "blub", "age" → "28")
+          .query().toMap.asScala must contain allOf ("name" -> "blub", "age" -> "28")
       }
       "access parameters" in {
-        val Seq(param1, param2, param3) =
+        val mutable.Seq(param1, param2, param3) =
           Uri.create("/abc?name=blub&age=28&name=blub2")
             .query().toList.asScala.map(_.toScala)
 
-        param1 must be("name" → "blub")
-        param2 must be("age" → "28")
-        param3 must be("name" → "blub2")
+        param1 must be("name" -> "blub")
+        param2 must be("age" -> "28")
+        param3 must be("name" -> "blub2")
       }
       "access single parameter" in {
         val query = Uri.create("/abc?name=blub").query()

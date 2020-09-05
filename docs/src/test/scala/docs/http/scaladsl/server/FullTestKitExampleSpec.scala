@@ -1,30 +1,31 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package docs.http.scaladsl.server
 
-// format: OFF
-
 //#source-quote
-import org.scalatest.{ Matchers, WordSpec }
 import akka.http.scaladsl.model.StatusCodes
 import akka.http.scaladsl.testkit.ScalatestRouteTest
 import akka.http.scaladsl.server._
 import Directives._
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
 
-class FullTestKitExampleSpec extends WordSpec with Matchers with ScalatestRouteTest {
+class FullTestKitExampleSpec extends AnyWordSpec with Matchers with ScalatestRouteTest {
 
   val smallRoute =
     get {
-      pathSingleSlash {
-        complete {
-          "Captain on the bridge!"
+      concat(
+        pathSingleSlash {
+          complete {
+            "Captain on the bridge!"
+          }
+        },
+        path("ping") {
+          complete("PONG!")
         }
-      } ~
-      path("ping") {
-        complete("PONG!")
-      }
+      )
     }
 
   "The service" should {

@@ -4,7 +4,7 @@
 
 ## Signature
 
-@@signature [BasicDirectives.scala]($akka-http$/akka-http/src/main/scala/akka/http/scaladsl/server/directives/BasicDirectives.scala) { #recoverRejectionsWith }
+@@signature [BasicDirectives.scala](/akka-http/src/main/scala/akka/http/scaladsl/server/directives/BasicDirectives.scala) { #recoverRejectionsWith }
 
 @@@
 
@@ -13,7 +13,7 @@
 **Low level directive** – unless you're sure you need to be working on this low-level you might instead
 want to try the @ref[handleRejections](../execution-directives/handleRejections.md) directive which provides a nicer DSL for building rejection handlers.
 
-Transforms rejections from the inner route with @scala[an `immutable.Seq[Rejection] ⇒ Future[RouteResult]` function]@java[a `Function<Iterable<Rejection>, CompletionStage<RouteResult>>`].
+Transforms rejections from the inner route with @scala[an `immutable.Seq[Rejection] => Future[RouteResult]` function]@java[a `Function<Iterable<Rejection>, CompletionStage<RouteResult>>`].
 
 Asynchronous version of @ref[recoverRejections](recoverRejections.md).
 

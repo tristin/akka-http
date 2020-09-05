@@ -1,17 +1,18 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.model
 
 import java.io._
 import headers._
-import org.scalatest.{ Matchers, WordSpec }
 import org.scalatest.matchers.{ MatchResult, Matcher }
 import scala.util.Try
 import akka.util.ByteString
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
 
-class SerializabilitySpec extends WordSpec with Matchers {
+class SerializabilitySpec extends AnyWordSpec with Matchers {
 
   "HttpRequests" should {
     "be serializable" when {
@@ -63,7 +64,7 @@ class SerializabilitySpec extends WordSpec with Matchers {
     }
   }
 
-  def beSerializable: Matcher[AnyRef] = Matcher[AnyRef] { value ⇒
+  def beSerializable: Matcher[AnyRef] = Matcher[AnyRef] { value =>
     val result = Try(tryToSerialize(value))
     MatchResult(
       result.isSuccess,

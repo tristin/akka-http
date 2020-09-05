@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.server
@@ -37,6 +37,7 @@ trait Directives extends RouteConcatenation
   with SecurityDirectives
   with WebSocketDirectives
   with FramedEntityStreamingDirectives
+  with AttributeDirectives
 
 /**
  * Collects all default directives into one object for simple importing.

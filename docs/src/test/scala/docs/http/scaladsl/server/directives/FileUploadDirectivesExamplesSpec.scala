@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2015-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package docs.http.scaladsl.server.directives
@@ -10,43 +10,22 @@ import akka.http.scaladsl.testkit.RouteTestTimeout
 import akka.stream.scaladsl.Framing
 import akka.testkit.TestDuration
 import akka.util.ByteString
-import docs.http.scaladsl.server.RoutingSpec
 import java.io.File
+
+import akka.http.scaladsl.server.RoutingSpec
+import docs.CompileOnlySpec
+
 import scala.concurrent.Future
 import scala.concurrent.duration._
 
-class FileUploadDirectivesExamplesSpec extends RoutingSpec {
+class FileUploadDirectivesExamplesSpec extends RoutingSpec with CompileOnlySpec {
 
-  override def testConfigSource = "akka.actor.default-mailbox.mailbox-type = \"akka.dispatch.UnboundedMailbox\""
+  override def testConfigSource = super.testConfigSource ++ """
+    akka.actor.default-mailbox.mailbox-type = "akka.dispatch.UnboundedMailbox"
+  """
 
   // test touches disk, so give it some time
-  implicit val routeTimeout = RouteTestTimeout(3.seconds.dilated)
-
-  "uploadedFile" in {
-    //#uploadedFile
-
-    val route =
-      uploadedFile("csv") {
-        case (metadata, file) =>
-          // do something with the file and file metadata ...
-          file.delete()
-          complete(StatusCodes.OK)
-      }
-
-    // tests:
-    val multipartForm =
-      Multipart.FormData(
-        Multipart.FormData.BodyPart.Strict(
-          "csv",
-          HttpEntity(ContentTypes.`text/plain(UTF-8)`, "2,3,5\n7,11,13,17,23\n29,31,37\n"),
-          Map("filename" -> "primes.csv")))
-
-    Post("/", multipartForm) ~> route ~> check {
-      status shouldEqual StatusCodes.OK
-    }
-
-    //#uploadedFile
-  }
+  implicit val routeTimeout = RouteTestTimeout(7.seconds.dilated)
 
   "storeUploadedFile" in {
     //#storeUploadedFile
@@ -171,7 +150,7 @@ class FileUploadDirectivesExamplesSpec extends RoutingSpec {
                   .map(_.toInt)
                   .runFold(0) { (acc, n) => acc + n }
 
-                accF.flatMap(acc ⇒ intF.map(acc + _))
+                accF.flatMap(acc => intF.map(acc + _))
             }
 
             onSuccess(sumF) { sum => complete(s"Sum: $sum") }

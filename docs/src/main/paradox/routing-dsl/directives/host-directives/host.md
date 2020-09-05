@@ -7,7 +7,7 @@ in the request.
 
 ## Signature
 
-@@signature [HostDirectives.scala]($akka-http$/akka-http/src/main/scala/akka/http/scaladsl/server/directives/HostDirectives.scala) { #host }
+@@signature [HostDirectives.scala](/akka-http/src/main/scala/akka/http/scaladsl/server/directives/HostDirectives.scala) { #host }
 
 @@@
 
@@ -17,7 +17,7 @@ in the request.
 
 The `def host(hostNames: String*)` overload rejects all requests with a hostname different from the given ones.
 
-The `def host(predicate: String ⇒ Boolean)` overload rejects all requests for which the hostname does
+The `def host(predicate: String => Boolean)` overload rejects all requests for which the hostname does
 not satisfy the given predicate.
 
 @@@

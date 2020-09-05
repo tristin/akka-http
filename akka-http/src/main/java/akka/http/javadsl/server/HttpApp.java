@@ -1,11 +1,10 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.javadsl.server;
 
 import akka.Done;
-import akka.annotation.ApiMayChange;
 import akka.actor.ActorSystem;
 import akka.event.Logging;
 import akka.http.javadsl.ConnectHttp;
@@ -23,11 +22,14 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * API MAY CHANGE - EXPERIMENTAL
+ * DEPRECATED, consider https://developer.lightbend.com/guides/akka-http-quickstart-java/ instead
+ *
  * Bootstrap trait for Http Server. It helps booting up an akka-http server by only defining the desired routes.
  * It offers additional hooks to modify the default behavior.
+ *
+ * @deprecated HttpApp this doesn't reflect the latest Akka APIs, since 10.2.0
  */
-@ApiMayChange
+@Deprecated
 public abstract class HttpApp extends AllDirectives {
 
   private AtomicReference<ServerBinding> serverBinding = new AtomicReference<>();
@@ -47,7 +49,7 @@ public abstract class HttpApp extends AllDirectives {
   /**
    * Start a server on the specified host and port, using the provided [[ActorSystem]]
    * Note that this method is blocking.
-   * 
+   *
    * @param system ActorSystem to use for starting the app,
    *   if null is passed in a new default ActorSystem will be created instead, which will
    *   be terminated when the server is stopped.
@@ -67,7 +69,7 @@ public abstract class HttpApp extends AllDirectives {
   /**
    * Start a server on the specified host and port, using the provided settings and [[ActorSystem]].
    * Note that this method is blocking.
-   * 
+   *
    * @param system ActorSystem to use for starting the app,
    *   if null is passed in a new default ActorSystem will be created instead, which will
    *   be terminated when the server is stopped.
@@ -80,8 +82,8 @@ public abstract class HttpApp extends AllDirectives {
    * Start a server on the specified host and port, using the provided settings and [[ActorSystem]] if present.
    * Note that this method is blocking.
    * This method may throw an {@link ExecutionException} or {@link InterruptedException} if the future that signals that
-   * the server should shutdown is interrupted or cancelled.   
-   * 
+   * the server should shutdown is interrupted or cancelled.
+   *
    * @param system ActorSystem to use for starting the app,
    *   if an empty Optional is passed in a new default ActorSystem will be created instead, which will
    *   be terminated when the server is stopped.
@@ -94,11 +96,9 @@ public abstract class HttpApp extends AllDirectives {
 
     CompletionStage<ServerBinding> bindingFuture = Http
       .get(theSystem)
-      .bindAndHandle(routes().flow(theSystem, materializer),
-        ConnectHttp.toHost(host, port),
-        settings,
-        theSystem.log(),
-        materializer);
+      .newServerAt(host, port)
+      .withSettings(settings)
+      .bind(routes());
 
     bindingFuture.handle((binding, exception) -> {
       if (exception != null) {

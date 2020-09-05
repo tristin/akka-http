@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.coding
@@ -7,7 +7,7 @@ package akka.http.scaladsl.coding
 import java.io.{ OutputStream, InputStream }
 
 class NoCodingSpec extends CoderSpec {
-  protected def Coder: Coder with StreamDecoder = NoCoding
+  protected def Coder: Coder = Coders.NoCoding
 
   override protected def corruptInputCheck = false
 

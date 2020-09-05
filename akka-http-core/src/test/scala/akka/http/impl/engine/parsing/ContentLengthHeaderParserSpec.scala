@@ -1,15 +1,16 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.engine.parsing
 
-import org.scalatest.{ WordSpec, Matchers }
 import akka.util.ByteString
 import akka.http.scaladsl.model.headers.`Content-Length`
 import akka.http.impl.engine.parsing.SpecializedHeaderValueParsers.ContentLengthParser
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
 
-abstract class ContentLengthHeaderParserSpec(mode: String, newLine: String) extends WordSpec with Matchers {
+abstract class ContentLengthHeaderParserSpec(mode: String, newLine: String) extends AnyWordSpec with Matchers {
 
   s"specialized ContentLength parser (mode: $mode)" should {
     "accept zero" in {
@@ -30,7 +31,7 @@ abstract class ContentLengthHeaderParserSpec(mode: String, newLine: String) exte
   }
 
   def parse(bigint: String): Long = {
-    val (`Content-Length`(length), _) = ContentLengthParser(null, ByteString(bigint + newLine).compact, 0, _ ⇒ ())
+    val (`Content-Length`(length), _) = ContentLengthParser(null, ByteString(bigint + newLine).compact, 0, _ => ())
     length
   }
 

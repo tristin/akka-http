@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.model.parser
@@ -15,50 +15,50 @@ import akka.http.scaladsl.model.headers._
  * All header rules that require more than one single rule are modelled in their own trait.
  */
 @InternalApi
-private[parser] trait SimpleHeaders { this: Parser with CommonRules with CommonActions with IpAddressParsing ⇒
+private[parser] trait SimpleHeaders { this: Parser with CommonRules with CommonActions with IpAddressParsing =>
 
   // http://tools.ietf.org/html/rfc7233#section-2.3
   def `accept-ranges` = rule {
     ("none" ~ push(Nil) | zeroOrMore(ws(',')) ~ oneOrMore(`range-unit`).separatedBy(listSep)) ~ EOI ~> (`Accept-Ranges`(_))
   }
 
-  // http://www.w3.org/TR/cors/#access-control-allow-credentials-response-header
+  // https://www.w3.org/TR/cors/#access-control-allow-credentials-response-header
   // in addition to the spec we also allow for a `false` value
   def `access-control-allow-credentials` = rule(
     ("true" ~ push(`Access-Control-Allow-Credentials`(true))
       | "false" ~ push(`Access-Control-Allow-Credentials`(false))) ~ EOI)
 
-  // http://www.w3.org/TR/cors/#access-control-allow-headers-response-header
+  // https://www.w3.org/TR/cors/#access-control-allow-headers-response-header
   def `access-control-allow-headers` = rule {
     zeroOrMore(token).separatedBy(listSep) ~ EOI ~> (`Access-Control-Allow-Headers`(_))
   }
 
-  // http://www.w3.org/TR/cors/#access-control-allow-methods-response-header
+  // https://www.w3.org/TR/cors/#access-control-allow-methods-response-header
   def `access-control-allow-methods` = rule {
     zeroOrMore(httpMethodDef).separatedBy(listSep) ~ EOI ~> (`Access-Control-Allow-Methods`(_))
   }
 
-  // http://www.w3.org/TR/cors/#access-control-allow-origin-response-header
+  // https://www.w3.org/TR/cors/#access-control-allow-origin-response-header
   def `access-control-allow-origin` = rule(
     ws('*') ~ EOI ~ push(`Access-Control-Allow-Origin`.`*`)
-      | `origin-list-or-null` ~ EOI ~> (origins ⇒ `Access-Control-Allow-Origin`.forRange(HttpOriginRange(origins: _*))))
+      | `origin-list-or-null` ~ EOI ~> (origins => `Access-Control-Allow-Origin`.forRange(HttpOriginRange(origins: _*))))
 
-  // http://www.w3.org/TR/cors/#access-control-expose-headers-response-header
+  // https://www.w3.org/TR/cors/#access-control-expose-headers-response-header
   def `access-control-expose-headers` = rule {
     zeroOrMore(token).separatedBy(listSep) ~ EOI ~> (`Access-Control-Expose-Headers`(_))
   }
 
-  // http://www.w3.org/TR/cors/#access-control-max-age-response-header
+  // https://www.w3.org/TR/cors/#access-control-max-age-response-header
   def `access-control-max-age` = rule {
     `delta-seconds` ~ EOI ~> (`Access-Control-Max-Age`(_))
   }
 
-  // http://www.w3.org/TR/cors/#access-control-request-headers-request-header
+  // https://www.w3.org/TR/cors/#access-control-request-headers-request-header
   def `access-control-request-headers` = rule {
     zeroOrMore(token).separatedBy(listSep) ~ EOI ~> (`Access-Control-Request-Headers`(_))
   }
 
-  // http://www.w3.org/TR/cors/#access-control-request-method-request-header
+  // https://www.w3.org/TR/cors/#access-control-request-method-request-header
   def `access-control-request-method` = rule {
     httpMethodDef ~ EOI ~> (`Access-Control-Request-Method`(_))
   }
@@ -82,13 +82,20 @@ private[parser] trait SimpleHeaders { this: Parser with CommonRules with CommonA
   // http://tools.ietf.org/html/rfc7231#section-3.1.2.2
   // http://tools.ietf.org/html/rfc7231#appendix-D
   def `content-encoding` = rule {
-    oneOrMore(token ~> (x ⇒ HttpEncodings.getForKeyCaseInsensitive(x) getOrElse HttpEncoding.custom(x)))
+    oneOrMore(token ~> (x => HttpEncodings.getForKeyCaseInsensitive(x) getOrElse HttpEncoding.custom(x)))
       .separatedBy(listSep) ~ EOI ~> (`Content-Encoding`(_))
   }
 
   // http://tools.ietf.org/html/rfc7230#section-3.3.2
   def `content-length` = rule {
     longNumberCapped ~> (`Content-Length`(_)) ~ EOI
+  }
+
+  // https://tools.ietf.org/html/rfc7231#section-3.1.4.2
+  def `content-location` = rule {
+    // we are bit more relaxed than the spec here by also parsing a potential fragment
+    // but catch it in the `Content-Location` instance validation (with a `require` in the constructor)
+    uriReference ~ EOI ~> (`Content-Location`(_))
   }
 
   // http://tools.ietf.org/html/rfc7233#section-4.2
@@ -98,8 +105,8 @@ private[parser] trait SimpleHeaders { this: Parser with CommonRules with CommonA
 
   // https://tools.ietf.org/html/rfc6265#section-4.2
   def `cookie` = rule {
-    oneOrMore(`optional-cookie-pair`).separatedBy(';' ~ OWS) ~ EOI ~> { pairs ⇒
-      val validPairs = pairs.collect { case Some(p) ⇒ p }
+    oneOrMore(`optional-cookie-pair`).separatedBy(';' ~ OWS) ~ EOI ~> { pairs =>
+      val validPairs = pairs.collect { case Some(p) => p }
       `Cookie` {
         if (validPairs.nonEmpty) validPairs
         // Parsing infrastructure requires to return an HttpHeader value here but it is not possible
@@ -139,7 +146,7 @@ private[parser] trait SimpleHeaders { this: Parser with CommonRules with CommonA
   // http://tools.ietf.org/html/rfc7232#section-3.1
   def `if-match` = rule(
     ws('*') ~ EOI ~ push(`If-Match`.`*`)
-      | oneOrMore(`entity-tag`).separatedBy(listSep) ~ EOI ~> (tags ⇒ `If-Match`(EntityTagRange(tags: _*))))
+      | oneOrMore(`entity-tag`).separatedBy(listSep) ~ EOI ~> (tags => `If-Match`(EntityTagRange(tags: _*))))
 
   // http://tools.ietf.org/html/rfc7232#section-3.3
   def `if-modified-since` = rule { `HTTP-date` ~ EOI ~> (`If-Modified-Since`(_)) }
@@ -147,7 +154,7 @@ private[parser] trait SimpleHeaders { this: Parser with CommonRules with CommonA
   // http://tools.ietf.org/html/rfc7232#section-3.2
   def `if-none-match` = rule {
     ws('*') ~ EOI ~ push(`If-None-Match`.`*`) |
-      oneOrMore(`entity-tag`).separatedBy(listSep) ~ EOI ~> (tags ⇒ `If-None-Match`(EntityTagRange(tags: _*)))
+      oneOrMore(`entity-tag`).separatedBy(listSep) ~ EOI ~> (tags => `If-None-Match`(EntityTagRange(tags: _*)))
   }
 
   // http://tools.ietf.org/html/rfc7232#section-3.5
@@ -194,8 +201,21 @@ private[parser] trait SimpleHeaders { this: Parser with CommonRules with CommonA
   // http://tools.ietf.org/html/rfc7231#section-7.4.2
   def server = rule { products ~ EOI ~> (Server(_)) }
 
-  def `strict-transport-security` = rule {
-    ignoreCase("max-age=") ~ `delta-seconds` ~ optional(ws(";") ~ ignoreCase("includesubdomains") ~ push(true)) ~ zeroOrMore(ws(";") ~ token0) ~ EOI ~> (`Strict-Transport-Security`(_, _))
+  // https://tools.ietf.org/html/rfc6797#section-6
+  def `strict-transport-security` = {
+    def directives =
+      rule(
+        ignoreCase("includesubdomains") ~ push(IncludeSubDomains)
+          | ignoreCase("max-age=") ~ `delta-seconds` ~> (MaxAge(_))
+      )
+    def ignoredDirective = rule {
+      token ~ optional(ws("=") ~ word) ~> ((k: String, v: Option[String]) => IgnoredDirective(k + v.getOrElse("")))
+    }
+
+    rule {
+      oneOrMore(directives | ignoredDirective).separatedBy(oneOrMore(ws(";"))) ~ zeroOrMore(ws(";")) ~ EOI ~>
+        (`Strict-Transport-Security`.fromDirectives(_: _*))
+    }
   }
 
   // http://tools.ietf.org/html/rfc7230#section-3.3.1
@@ -236,7 +256,7 @@ private[parser] trait SimpleHeaders { this: Parser with CommonRules with CommonA
 
   // de-facto standard as per https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-Forwarded-Host
   def `x-forwarded-host` = rule {
-    host ~> (hostHeader ⇒ `X-Forwarded-Host`(hostHeader.host))
+    host ~> (hostHeader => `X-Forwarded-Host`(hostHeader.host))
   }
 
   // de-facto standard as per https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-Forwarded-Proto
@@ -245,7 +265,7 @@ private[parser] trait SimpleHeaders { this: Parser with CommonRules with CommonA
   }
 
   def `x-real-ip` = rule {
-    (`ip-v4-address` | `ip-v6-address`) ~ EOI ~> (b ⇒ `X-Real-Ip`(RemoteAddress(b)))
+    (`ip-v4-address` | `ip-v6-address`) ~ EOI ~> (b => `X-Real-Ip`(RemoteAddress(b)))
   }
 
 }

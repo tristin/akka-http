@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.server
@@ -7,7 +7,8 @@ package directives
 
 import scala.collection.immutable
 
-import akka.http.scaladsl.model.ws.{ UpgradeToWebSocket, Message }
+import akka.http.scaladsl.model.AttributeKeys.webSocketUpgrade
+import akka.http.scaladsl.model.ws.{ Message, UpgradeToWebSocket, WebSocketUpgrade }
 import akka.stream.scaladsl.Flow
 
 /**
@@ -15,6 +16,7 @@ import akka.stream.scaladsl.Flow
  * @groupprio websocket 230
  */
 trait WebSocketDirectives {
+  import AttributeDirectives._
   import BasicDirectives._
   import HeaderDirectives._
   import RouteDirectives._
@@ -24,10 +26,23 @@ trait WebSocketDirectives {
    *
    * @group websocket
    */
+  @deprecated("use `extractWebSocketUpgrade` instead", since = "10.2.0")
   def extractUpgradeToWebSocket: Directive1[UpgradeToWebSocket] =
-    optionalHeaderValueByType[UpgradeToWebSocket](()).flatMap {
-      case Some(upgrade) ⇒ provide(upgrade)
-      case None          ⇒ reject(ExpectedWebSocketRequestRejection)
+    optionalHeaderValueByType(classOf[UpgradeToWebSocket]).flatMap {
+      case Some(upgrade) => provide(upgrade)
+      case None          => reject(ExpectedWebSocketRequestRejection)
+    }
+
+  /**
+   * Extract the WebSocketUpgrade attribute if this is a WebSocket request.
+   * Rejects with an [[ExpectedWebSocketRequestRejection]], otherwise.
+   *
+   * @group websocket
+   */
+  def extractWebSocketUpgrade: Directive1[WebSocketUpgrade] =
+    optionalAttribute(webSocketUpgrade).flatMap {
+      case Some(upgrade) => provide(upgrade)
+      case None          => reject(ExpectedWebSocketRequestRejection)
     }
 
   /**
@@ -36,7 +51,8 @@ trait WebSocketDirectives {
    *
    * @group websocket
    */
-  def extractOfferedWsProtocols: Directive1[immutable.Seq[String]] = extractUpgradeToWebSocket.map(_.requestedProtocols)
+  def extractOfferedWsProtocols: Directive1[immutable.Seq[String]] =
+    extractWebSocketUpgrade.map(_.requestedProtocols)
 
   /**
    * Handles WebSocket requests with the given handler and rejects other requests with an
@@ -70,8 +86,8 @@ trait WebSocketDirectives {
    * @group websocket
    */
   def handleWebSocketMessagesForOptionalProtocol(handler: Flow[Message, Message, Any], subprotocol: Option[String]): Route =
-    extractUpgradeToWebSocket { upgrade ⇒
-      if (subprotocol.forall(sub ⇒ upgrade.requestedProtocols.exists(_ equalsIgnoreCase sub)))
+    extractWebSocketUpgrade { upgrade =>
+      if (subprotocol.forall(sub => upgrade.requestedProtocols.exists(_ equalsIgnoreCase sub)))
         complete(upgrade.handleMessages(handler, subprotocol))
       else
         reject(UnsupportedWebSocketSubprotocolRejection(subprotocol.get)) // None.forall == true

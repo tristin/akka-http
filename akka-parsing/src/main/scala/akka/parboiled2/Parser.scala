@@ -114,15 +114,18 @@ abstract class Parser(
   private var _cursor: Int = _
 
   // the value stack instance we operate on
-  private var _valueStack: ValueStack = _
+  private var _valueStack: ValueStack = new ValueStack(initialValueStackSize, maxValueStackSize)
 
   // the current ErrorAnalysisPhase or null (in the initial run)
   private var phase: ErrorAnalysisPhase = _
+
+  private var _maxLength = -1
 
   def copyStateFrom(other: Parser, offset: Int): Unit = {
     _cursorChar = other._cursorChar
     _cursor = other._cursor - offset
     _valueStack = other._valueStack
+    _maxLength = other._maxLength
     phase = other.phase
     if (phase ne null) phase.applyOffset(offset)
   }
@@ -135,21 +138,19 @@ abstract class Parser(
   /**
    * THIS IS NOT PUBLIC API and might become hidden in future. Use only if you know what you are doing!
    */
-  def __run[L <: HList](rule: ⇒ RuleN[L])(implicit scheme: Parser.DeliveryScheme[L]): scheme.Result = {
+  def __run[L <: HList](rule: => RuleN[L])(implicit scheme: Parser.DeliveryScheme[L]): scheme.Result = {
     def runRule(): Boolean = {
       _cursor = -1
+      _maxLength = input.length
       __advance()
       valueStack.clear()
       try rule ne null
       catch {
-        case CutError ⇒ false
+        case CutError => false
       }
     }
 
-    def phase0_initialRun() = {
-      _valueStack = new ValueStack(initialValueStackSize, maxValueStackSize)
-      runRule()
-    }
+    def phase0_initialRun() = runRule()
 
     def phase1_establishPrincipalErrorIndex(): Int = {
       val phase1 = new EstablishingPrincipalErrorIndex()
@@ -171,7 +172,7 @@ abstract class Parser(
         if (runRule()) sys.error("Parsing unexpectedly succeeded while trying to determine quiet reporting")
         true // if we got here we can only reach the reportedErrorIndex via quiet rules
       } catch {
-        case UnquietMismatch ⇒ false // we mismatched beyond the reportedErrorIndex outside of a quiet rule
+        case UnquietMismatch => false // we mismatched beyond the reportedErrorIndex outside of a quiet rule
       }
     }
 
@@ -192,7 +193,7 @@ abstract class Parser(
             runRule()
             null // we managed to complete the run w/o exception, i.e. we have collected all traces
           } catch {
-            case e: TracingBubbleException ⇒ e.trace
+            case e: TracingBubbleException => e.trace
           }
         if (trace eq null) done
         else phase4_collectRuleTraces(reportedErrorIndex, principalErrorIndex,
@@ -211,10 +212,10 @@ abstract class Parser(
         scheme.parseError(parseError)
       }
     } catch {
-      case e: Parser.Fail ⇒
+      case e: Parser.Fail =>
         val pos = Position(cursor, input)
         scheme.parseError(ParseError(pos, pos, RuleTrace(Nil, RuleTrace.Fail(e.expected)) :: Nil))
-      case NonFatal(e) ⇒
+      case NonFatal(e) =>
         scheme.failure(e)
     } finally {
       phase = null
@@ -225,12 +226,10 @@ abstract class Parser(
    * THIS IS NOT PUBLIC API and might become hidden in future. Use only if you know what you are doing!
    */
   def __advance(): Boolean = {
-    var c = _cursor
-    val max = input.length
-    if (c < max) {
-      c += 1
-      _cursor = c
-      _cursorChar = if (c == max) EOI else input charAt c
+    val c = _cursor
+    if (c < _maxLength) {
+      _cursor = c + 1
+      _cursorChar = if ((c + 1) == _maxLength) EOI else input charAt (c + 1)
     }
     true
   }
@@ -240,8 +239,8 @@ abstract class Parser(
    */
   def __updateMaxCursor(): Boolean = {
     phase match {
-      case x: EstablishingPrincipalErrorIndex ⇒ if (_cursor > x.maxCursor) x.maxCursor = _cursor
-      case _                                  ⇒ // nothing to do
+      case x: EstablishingPrincipalErrorIndex => if (_cursor > x.maxCursor) x.maxCursor = _cursor
+      case _                                  => // nothing to do
     }
     true
   }
@@ -279,11 +278,11 @@ abstract class Parser(
    */
   def __enterAtomic(start: Int): Boolean =
     phase match {
-      case null ⇒ false
-      case x: EstablishingReportedErrorIndex if x.currentAtomicStart == Int.MinValue ⇒
+      case null => false
+      case x: EstablishingReportedErrorIndex if x.currentAtomicStart == Int.MinValue =>
         x.currentAtomicStart = start
         true
-      case _ ⇒ false
+      case _ => false
     }
 
   /**
@@ -292,8 +291,8 @@ abstract class Parser(
   def __exitAtomic(saved: Boolean): Unit =
     if (saved) {
       phase match {
-        case x: EstablishingReportedErrorIndex ⇒ x.currentAtomicStart = Int.MinValue
-        case _                                 ⇒ throw new IllegalStateException
+        case x: EstablishingReportedErrorIndex => x.currentAtomicStart = Int.MinValue
+        case _                                 => throw new IllegalStateException
       }
     }
 
@@ -302,17 +301,17 @@ abstract class Parser(
    */
   def __enterQuiet(): Int =
     phase match {
-      case x: DetermineReportQuiet ⇒
+      case x: DetermineReportQuiet =>
         if (x.inQuiet) -1
         else {
           x.inQuiet = true
           0
         }
-      case x: CollectingRuleTraces if !x.reportQuiet ⇒
+      case x: CollectingRuleTraces if !x.reportQuiet =>
         val saved = x.minErrorIndex
         x.minErrorIndex = Int.MaxValue // disables triggering of StartTracingException in __registerMismatch
         saved
-      case _ ⇒ -1
+      case _ => -1
     }
 
   /**
@@ -321,9 +320,9 @@ abstract class Parser(
   def __exitQuiet(saved: Int): Unit =
     if (saved >= 0) {
       phase match {
-        case x: DetermineReportQuiet ⇒ x.inQuiet = false
-        case x: CollectingRuleTraces ⇒ x.minErrorIndex = saved
-        case _                       ⇒ throw new IllegalStateException
+        case x: DetermineReportQuiet => x.inQuiet = false
+        case x: CollectingRuleTraces => x.minErrorIndex = saved
+        case _                       => throw new IllegalStateException
       }
     }
 
@@ -332,14 +331,14 @@ abstract class Parser(
    */
   def __registerMismatch(): Boolean = {
     phase match {
-      case null | _: EstablishingPrincipalErrorIndex ⇒ // nothing to do
-      case x: CollectingRuleTraces ⇒
+      case null | _: EstablishingPrincipalErrorIndex => // nothing to do
+      case x: CollectingRuleTraces =>
         if (_cursor >= x.minErrorIndex) {
           if (x.errorMismatches == x.traceNr) throw Parser.StartTracingException else x.errorMismatches += 1
         }
-      case x: EstablishingReportedErrorIndex ⇒
+      case x: EstablishingReportedErrorIndex =>
         if (x.currentAtomicStart > x.maxAtomicErrorStart) x.maxAtomicErrorStart = x.currentAtomicStart
-      case x: DetermineReportQuiet ⇒
+      case x: DetermineReportQuiet =>
         // stop this run early because we just learned that reporting quiet traces is unnecessary
         if (_cursor >= x.minErrorIndex & !x.inQuiet) throw UnquietMismatch
     }
@@ -362,9 +361,9 @@ abstract class Parser(
    */
   def __push(value: Any): Boolean = {
     value match {
-      case ()       ⇒
-      case x: HList ⇒ valueStack.pushAll(x)
-      case x        ⇒ valueStack.push(x)
+      case ()       =>
+      case x: HList => valueStack.pushAll(x)
+      case x        => valueStack.push(x)
     }
     true
   }
@@ -392,7 +391,7 @@ abstract class Parser(
       } else {
         try __registerMismatch()
         catch {
-          case Parser.StartTracingException ⇒
+          case Parser.StartTracingException =>
             import RuleTrace._
             __bubbleUp(NonTerminal(StringMatch(string), -ix) :: Nil, CharMatch(string charAt ix))
         }
@@ -422,7 +421,7 @@ abstract class Parser(
       } else {
         try __registerMismatch()
         catch {
-          case Parser.StartTracingException ⇒
+          case Parser.StartTracingException =>
             import RuleTrace._
             __bubbleUp(NonTerminal(IgnoreCaseString(string), -ix) :: Nil, IgnoreCaseChar(string charAt ix))
         }
@@ -479,7 +478,7 @@ abstract class Parser(
       }
       false
     } catch {
-      case e: TracingBubbleException ⇒ e.bubbleUp(RuleTrace.MapMatch(m), start)
+      case e: TracingBubbleException => e.bubbleUp(RuleTrace.MapMatch(m), start)
     }
   }
 
@@ -496,8 +495,8 @@ abstract class Parser(
     def bubbleUp(key: RuleTrace.NonTerminalKey, start: Int): Nothing = throw prepend(key, start)
     def prepend(key: RuleTrace.NonTerminalKey, start: Int): this.type = {
       val offset = phase match {
-        case x: CollectingRuleTraces ⇒ start - x.minErrorIndex
-        case _                       ⇒ throw new IllegalStateException
+        case x: CollectingRuleTraces => start - x.minErrorIndex
+        case _                       => throw new IllegalStateException
       }
       _trace = _trace.copy(prefix = RuleTrace.NonTerminal(key, offset) :: _trace.prefix)
       this
@@ -636,14 +635,14 @@ object ParserMacros {
   def runImpl[L <: HList: c.WeakTypeTag](c: RunnableRuleContext[L])()(scheme: c.Expr[Parser.DeliveryScheme[L]]): c.Expr[scheme.value.Result] = {
     import c.universe._
     val runCall = c.prefix.tree match {
-      case q"parboiled2.this.Rule.Runnable[$l]($ruleExpr)" ⇒ ruleExpr match {
-        case q"$p.$r" if p.tpe <:< typeOf[Parser] ⇒ q"val p = $p; p.__run[$l](p.$r)($scheme)"
-        case q"$p.$r($args)" if p.tpe <:< typeOf[Parser] ⇒ q"val p = $p; p.__run[$l](p.$r($args))($scheme)"
-        case q"$p.$r[$t]" if p.tpe <:< typeOf[Parser] ⇒ q"val p = $p; p.__run[$l](p.$r[$t])($scheme)"
-        case q"$p.$r[$t]" if p.tpe <:< typeOf[RuleX] ⇒ q"__run[$l]($ruleExpr)($scheme)"
-        case x ⇒ c.abort(x.pos, "Illegal `.run()` call base: " + x)
+      case q"parboiled2.this.Rule.Runnable[$l]($ruleExpr)" => ruleExpr match {
+        case q"$p.$r" if p.tpe <:< typeOf[Parser] => q"val p = $p; p.__run[$l](p.$r)($scheme)"
+        case q"$p.$r($args)" if p.tpe <:< typeOf[Parser] => q"val p = $p; p.__run[$l](p.$r($args))($scheme)"
+        case q"$p.$r[$t]" if p.tpe <:< typeOf[Parser] => q"val p = $p; p.__run[$l](p.$r[$t])($scheme)"
+        case q"$p.$r[$t]" if p.tpe <:< typeOf[RuleX] => q"__run[$l]($ruleExpr)($scheme)"
+        case x => c.abort(x.pos, "Illegal `.run()` call base: " + x)
       }
-      case x ⇒ c.abort(x.pos, "Illegal `Runnable.apply` call: " + x)
+      case x => c.abort(x.pos, "Illegal `Runnable.apply` call: " + x)
     }
     c.Expr[scheme.value.Result](runCall)
   }

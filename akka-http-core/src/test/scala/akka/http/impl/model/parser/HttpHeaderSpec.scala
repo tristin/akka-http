@@ -1,12 +1,11 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.model.parser
 
 import akka.http.scaladsl.settings.ParserSettings.CookieParsingMode
 import akka.http.impl.model.parser.HeaderParser.Settings
-import org.scalatest.{ FreeSpec, Matchers }
 import org.scalatest.matchers.{ MatchResult, Matcher }
 import akka.http.impl.util._
 import akka.http.scaladsl.model._
@@ -21,8 +20,10 @@ import java.net.InetAddress
 
 import akka.http.scaladsl.model.MediaType.WithOpenCharset
 import org.scalatest.exceptions.TestFailedException
+import org.scalatest.freespec.AnyFreeSpec
+import org.scalatest.matchers.should.Matchers
 
-class HttpHeaderSpec extends FreeSpec with Matchers {
+class HttpHeaderSpec extends AnyFreeSpec with Matchers {
   val `application/vnd.spray` = MediaType.applicationBinary("vnd.spray", MediaType.Compressible)
   val PROPFIND = HttpMethod.custom("PROPFIND")
 
@@ -42,10 +43,10 @@ class HttpHeaderSpec extends FreeSpec with Matchers {
       "Accept: */*, text/*; foo=bar, custom/custom; bar=\"b>az\"" =!=
         Accept(
           `*/*`,
-          MediaRange.custom("text", Map("foo" → "bar")),
-          MediaType.customBinary("custom", "custom", MediaType.Compressible, params = Map("bar" → "b>az")))
+          MediaRange.custom("text", Map("foo" -> "bar")),
+          MediaType.customBinary("custom", "custom", MediaType.Compressible, params = Map("bar" -> "b>az")))
       "Accept: application/*+xml; version=2" =!=
-        Accept(MediaType.customBinary("application", "*+xml", MediaType.Compressible, params = Map("version" → "2")))
+        Accept(MediaType.customBinary("application", "*+xml", MediaType.Compressible, params = Map("version" -> "2")))
     }
 
     "Accept-Charset" in {
@@ -56,7 +57,7 @@ class HttpHeaderSpec extends FreeSpec with Matchers {
       "Accept-Charset: latin1, UTf-16; q=0, *;q=0.8" =!=
         `Accept-Charset`(`ISO-8859-1`, `UTF-16` withQValue 0, HttpCharsetRange.`*` withQValue 0.8).renderedTo(
           "ISO-8859-1, UTF-16;q=0.0, *;q=0.8")
-      `Accept-Charset`(`UTF-16` withQValue 0.234567).toString shouldEqual "Accept-Charset: UTF-16;q=0.235"
+      `Accept-Charset`(`UTF-16` withQValue 0.234567).unsafeToString shouldEqual "Accept-Charset: UTF-16;q=0.235"
       "Accept-Charset: UTF-16, unsupported42" =!= `Accept-Charset`(`UTF-16`, HttpCharset.custom("unsupported42"))
     }
 
@@ -141,16 +142,16 @@ class HttpHeaderSpec extends FreeSpec with Matchers {
       "Authorization: Fancy QWxhZGRpbjpvcGVuIHNlc2FtZQ==" =!=
         Authorization(GenericHttpCredentials("Fancy", "QWxhZGRpbjpvcGVuIHNlc2FtZQ=="))
       """Authorization: Fancy yes="n:o", nonce=42""" =!=
-        Authorization(GenericHttpCredentials("Fancy", Map("yes" → "n:o", "nonce" → "42"))).renderedTo(
-          """Fancy yes="n:o",nonce=42""")
-      """Authorization: Fancy yes=no,nonce="4\\2"""" =!=
-        Authorization(GenericHttpCredentials("Fancy", Map("yes" → "no", "nonce" → """4\2""")))
-      """Authorization: Other yes=no,empty=""""" =!=
-        Authorization(GenericHttpCredentials("Other", Map("yes" → "no", "empty" → "")))
+        Authorization(GenericHttpCredentials("Fancy", Map("nonce" -> "42", "yes" -> "n:o"))).renderedTo(
+          """Fancy nonce=42,yes="n:o"""")
+      """Authorization: Fancy nonce="4\\2",yes=no""" =!=
+        Authorization(GenericHttpCredentials("Fancy", Map("nonce" -> """4\2""", "yes" -> "no")))
+      """Authorization: Other empty="",yes=no""" =!=
+        Authorization(GenericHttpCredentials("Other", Map("empty" -> "", "yes" -> "no")))
       "Authorization: Basic Qm9iOg==" =!=
         Authorization(BasicHttpCredentials("Bob", ""))
       """Authorization: Digest name=Bob""" =!=
-        Authorization(GenericHttpCredentials("Digest", Map("name" → "Bob")))
+        Authorization(GenericHttpCredentials("Digest", Map("name" -> "Bob")))
       """Authorization: Bearer mF_9.B5f-4.1JqM/""" =!=
         Authorization(OAuth2BearerToken("mF_9.B5f-4.1JqM/"))
       "Authorization: NoParamScheme" =!=
@@ -191,10 +192,10 @@ class HttpHeaderSpec extends FreeSpec with Matchers {
 
     "Content-Disposition" in {
       "Content-Disposition: form-data" =!= `Content-Disposition`(ContentDispositionTypes.`form-data`)
-      "Content-Disposition: attachment; name=\"field1\"; filename=\"file/txt\"" =!=
-        `Content-Disposition`(ContentDispositionTypes.attachment, Map("name" → "field1", "filename" → "file/txt"))
+      "Content-Disposition: attachment; filename=\"file/txt\"; name=\"field1\"" =!=
+        `Content-Disposition`(ContentDispositionTypes.attachment, Map("filename" -> "file/txt", "name" -> "field1"))
       "Content-Disposition: attachment; name=\"field1\"; other=\"\"" =!=
-        `Content-Disposition`(ContentDispositionTypes.attachment, Map("name" → "field1", "other" → ""))
+        `Content-Disposition`(ContentDispositionTypes.attachment, Map("name" -> "field1", "other" -> ""))
     }
 
     "Content-Encoding" in {
@@ -208,6 +209,14 @@ class HttpHeaderSpec extends FreeSpec with Matchers {
         .renderedTo("999999999999999999")
     }
 
+    "Content-Location" in {
+      "Content-Location: https://spray.io/secure" =!= `Content-Location`(Uri("https://spray.io/secure"))
+      "Content-Location: /en-us/default.aspx?foo=bar" =!= `Content-Location`(Uri("/en-us/default.aspx?foo=bar"))
+      "Content-Location: https://akka.io/#sec" =!= ErrorInfo(
+        "Illegal HTTP header 'Content-Location': requirement failed",
+        "Content-Location header URI must not contain a fragment")
+    }
+
     "Content-Type" in {
       "Content-Type: application/pdf" =!=
         `Content-Type`(`application/pdf`)
@@ -215,10 +224,12 @@ class HttpHeaderSpec extends FreeSpec with Matchers {
         `Content-Type`(`application/json`)
       "Content-Type: text/plain; charset=utf8" =!=
         `Content-Type`(ContentType(`text/plain`, `UTF-8`)).renderedTo("text/plain; charset=UTF-8")
+      "Content-Type: text/plain; Charset=utf8" =!=
+        `Content-Type`(ContentType(`text/plain`, `UTF-8`)).renderedTo("text/plain; charset=UTF-8")
       "Content-Type: text/plain" =!=
         `Content-Type`(ContentType.WithMissingCharset(MediaTypes.`text/plain`)).renderedTo("text/plain")
       "Content-Type: text/xml2; version=3; charset=windows-1252" =!=
-        `Content-Type`(MediaType.customWithOpenCharset("text", "xml2", params = Map("version" → "3"))
+        `Content-Type`(MediaType.customWithOpenCharset("text", "xml2", params = Map("version" -> "3"))
           withCharset HttpCharsets.getForKey("windows-1252").get)
       "Content-Type: text/plain; charset=fancy-pants" =!=
         `Content-Type`(`text/plain` withCharset HttpCharset.custom("fancy-pants"))
@@ -241,17 +252,17 @@ class HttpHeaderSpec extends FreeSpec with Matchers {
     }
 
     "Cookie (RFC 6265)" in {
-      "Cookie: SID=31d4d96e407aad42" =!= Cookie("SID" → "31d4d96e407aad42")
-      "Cookie: SID=31d4d96e407aad42; lang=en>US" =!= Cookie("SID" → "31d4d96e407aad42", "lang" → "en>US")
-      "Cookie: a=1; b=2" =!= Cookie("a" → "1", "b" → "2")
-      "Cookie: a=1;b=2" =!= Cookie("a" → "1", "b" → "2").renderedTo("a=1; b=2")
-      "Cookie: a=1 ;b=2" =!= Cookie("a" → "1", "b" → "2").renderedTo("a=1; b=2")
+      "Cookie: SID=31d4d96e407aad42" =!= Cookie("SID" -> "31d4d96e407aad42")
+      "Cookie: SID=31d4d96e407aad42; lang=en>US" =!= Cookie("SID" -> "31d4d96e407aad42", "lang" -> "en>US")
+      "Cookie: a=1; b=2" =!= Cookie("a" -> "1", "b" -> "2")
+      "Cookie: a=1;b=2" =!= Cookie("a" -> "1", "b" -> "2").renderedTo("a=1; b=2")
+      "Cookie: a=1 ;b=2" =!= Cookie("a" -> "1", "b" -> "2").renderedTo("a=1; b=2")
 
-      "Cookie: z=0;a=1,b=2" =!= Cookie("z" → "0").renderedTo("z=0")
-      """Cookie: a=1;b="test"""" =!= Cookie("a" → "1", "b" → "test").renderedTo("a=1; b=test")
+      "Cookie: z=0;a=1,b=2" =!= Cookie("z" -> "0").renderedTo("z=0")
+      """Cookie: a=1;b="test"""" =!= Cookie("a" -> "1", "b" -> "test").renderedTo("a=1; b=test")
 
-      "Cookie: a=1; b=f\"d\"c\"; c=xyz" =!= Cookie("a" → "1", "c" → "xyz").renderedTo("a=1; c=xyz")
-      "Cookie: a=1; b=ä; c=d" =!= Cookie("a" → "1", "c" → "d").renderedTo("a=1; c=d")
+      "Cookie: a=1; b=f\"d\"c\"; c=xyz" =!= Cookie("a" -> "1", "c" -> "xyz").renderedTo("a=1; c=xyz")
+      "Cookie: a=1; b=ä; c=d" =!= Cookie("a" -> "1", "c" -> "d").renderedTo("a=1; c=d")
 
       "Cookie: a=1,2" =!=
         ErrorInfo(
@@ -260,16 +271,16 @@ class HttpHeaderSpec extends FreeSpec with Matchers {
     }
 
     "Cookie (Raw)" in {
-      "Cookie: SID=31d4d96e407aad42" =!= Cookie("SID" → "31d4d96e407aad42").withCookieParsingMode(CookieParsingMode.Raw)
-      "Cookie: SID=31d4d96e407aad42; lang=en>US" =!= Cookie("SID" → "31d4d96e407aad42", "lang" → "en>US").withCookieParsingMode(CookieParsingMode.Raw)
-      "Cookie: a=1; b=2" =!= Cookie("a" → "1", "b" → "2").withCookieParsingMode(CookieParsingMode.Raw)
-      "Cookie: a=1;b=2" =!= Cookie("a" → "1", "b" → "2").renderedTo("a=1; b=2").withCookieParsingMode(CookieParsingMode.Raw)
-      "Cookie: a=1 ;b=2" =!= Cookie(List(HttpCookiePair.raw("a" → "1 "), HttpCookiePair("b" → "2"))).renderedTo("a=1 ; b=2").withCookieParsingMode(CookieParsingMode.Raw)
+      "Cookie: SID=31d4d96e407aad42" =!= Cookie("SID" -> "31d4d96e407aad42").withCookieParsingMode(CookieParsingMode.Raw)
+      "Cookie: SID=31d4d96e407aad42; lang=en>US" =!= Cookie("SID" -> "31d4d96e407aad42", "lang" -> "en>US").withCookieParsingMode(CookieParsingMode.Raw)
+      "Cookie: a=1; b=2" =!= Cookie("a" -> "1", "b" -> "2").withCookieParsingMode(CookieParsingMode.Raw)
+      "Cookie: a=1;b=2" =!= Cookie("a" -> "1", "b" -> "2").renderedTo("a=1; b=2").withCookieParsingMode(CookieParsingMode.Raw)
+      "Cookie: a=1 ;b=2" =!= Cookie(List(HttpCookiePair.raw("a" -> "1 "), HttpCookiePair("b" -> "2"))).renderedTo("a=1 ; b=2").withCookieParsingMode(CookieParsingMode.Raw)
 
-      "Cookie: z=0; a=1,b=2" =!= Cookie(List(HttpCookiePair("z" → "0"), HttpCookiePair.raw("a" → "1,b=2"))).withCookieParsingMode(CookieParsingMode.Raw)
-      """Cookie: a=1;b="test"""" =!= Cookie(List(HttpCookiePair("a" → "1"), HttpCookiePair.raw("b" → "\"test\""))).renderedTo("a=1; b=\"test\"").withCookieParsingMode(CookieParsingMode.Raw)
-      "Cookie: a=1; b=f\"d\"c\"; c=xyz" =!= Cookie(List(HttpCookiePair("a" → "1"), HttpCookiePair.raw("b" → "f\"d\"c\""), HttpCookiePair("c" → "xyz"))).withCookieParsingMode(CookieParsingMode.Raw)
-      "Cookie: a=1; b=ä; c=d" =!= Cookie(List(HttpCookiePair("a" → "1"), HttpCookiePair.raw("b" → "ä"), HttpCookiePair("c" → "d"))).withCookieParsingMode(CookieParsingMode.Raw)
+      "Cookie: z=0; a=1,b=2" =!= Cookie(List(HttpCookiePair("z" -> "0"), HttpCookiePair.raw("a" -> "1,b=2"))).withCookieParsingMode(CookieParsingMode.Raw)
+      """Cookie: a=1;b="test"""" =!= Cookie(List(HttpCookiePair("a" -> "1"), HttpCookiePair.raw("b" -> "\"test\""))).renderedTo("a=1; b=\"test\"").withCookieParsingMode(CookieParsingMode.Raw)
+      "Cookie: a=1; b=f\"d\"c\"; c=xyz" =!= Cookie(List(HttpCookiePair("a" -> "1"), HttpCookiePair.raw("b" -> "f\"d\"c\""), HttpCookiePair("c" -> "xyz"))).withCookieParsingMode(CookieParsingMode.Raw)
+      "Cookie: a=1; b=ä; c=d" =!= Cookie(List(HttpCookiePair("a" -> "1"), HttpCookiePair.raw("b" -> "ä"), HttpCookiePair("c" -> "d"))).withCookieParsingMode(CookieParsingMode.Raw)
     }
 
     "Date" in {
@@ -401,14 +412,14 @@ class HttpHeaderSpec extends FreeSpec with Matchers {
 
     "Proxy-Authenticate" in {
       "Proxy-Authenticate: Basic realm=\"WallyWorld\",attr=\"val>ue\", Fancy realm=\"yeah\"" =!=
-        `Proxy-Authenticate`(HttpChallenge("Basic", Some("WallyWorld"), Map("attr" → "val>ue")), HttpChallenge("Fancy", Some("yeah")))
+        `Proxy-Authenticate`(HttpChallenge("Basic", Some("WallyWorld"), Map("attr" -> "val>ue")), HttpChallenge("Fancy", Some("yeah")))
       """Proxy-Authenticate: NTLM TlRMTVNTUAABAAAABzIAAAYABgArAAAACwALACAAAABXT1JLU1RBVElPTkRPTUFJTg==""" =!=
-        `Proxy-Authenticate`(HttpChallenge("NTLM", None, Map("" → "TlRMTVNTUAABAAAABzIAAAYABgArAAAACwALACAAAABXT1JLU1RBVElPTkRPTUFJTg==")))
+        `Proxy-Authenticate`(HttpChallenge("NTLM", None, Map("" -> "TlRMTVNTUAABAAAABzIAAAYABgArAAAACwALACAAAABXT1JLU1RBVElPTkRPTUFJTg==")))
     }
 
     "Proxy-Authorization" in {
-      """Proxy-Authorization: Fancy yes=no,nonce="4\\2"""" =!=
-        `Proxy-Authorization`(GenericHttpCredentials("Fancy", Map("yes" → "no", "nonce" → """4\2""")))
+      """Proxy-Authorization: Fancy nonce="4\\2",yes=no""" =!=
+        `Proxy-Authorization`(GenericHttpCredentials("Fancy", Map("nonce" -> """4\2""", "yes" -> "no")))
       "Proxy-Authorization: Fancy QWxhZGRpbjpvcGVuIHNlc2FtZQ==" =!=
         `Proxy-Authorization`(GenericHttpCredentials("Fancy", "QWxhZGRpbjpvcGVuIHNlc2FtZQ=="))
     }
@@ -457,19 +468,19 @@ class HttpHeaderSpec extends FreeSpec with Matchers {
       "Sec-WebSocket-Extensions: abc, def" =!=
         `Sec-WebSocket-Extensions`(Vector(WebSocketExtension("abc"), WebSocketExtension("def")))
       "Sec-WebSocket-Extensions: abc; param=2; use_y, def" =!=
-        `Sec-WebSocket-Extensions`(Vector(WebSocketExtension("abc", Map("param" → "2", "use_y" → "")), WebSocketExtension("def")))
+        `Sec-WebSocket-Extensions`(Vector(WebSocketExtension("abc", Map("param" -> "2", "use_y" -> "")), WebSocketExtension("def")))
       "Sec-WebSocket-Extensions: abc; param=\",xyz\", def" =!=
-        `Sec-WebSocket-Extensions`(Vector(WebSocketExtension("abc", Map("param" → ",xyz")), WebSocketExtension("def")))
+        `Sec-WebSocket-Extensions`(Vector(WebSocketExtension("abc", Map("param" -> ",xyz")), WebSocketExtension("def")))
 
       // real examples from https://tools.ietf.org/html/draft-ietf-hybi-permessage-compression-19
       "Sec-WebSocket-Extensions: permessage-deflate" =!=
         `Sec-WebSocket-Extensions`(Vector(WebSocketExtension("permessage-deflate")))
       "Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits; server_max_window_bits=10" =!=
-        `Sec-WebSocket-Extensions`(Vector(WebSocketExtension("permessage-deflate", Map("client_max_window_bits" → "", "server_max_window_bits" → "10"))))
+        `Sec-WebSocket-Extensions`(Vector(WebSocketExtension("permessage-deflate", Map("client_max_window_bits" -> "", "server_max_window_bits" -> "10"))))
       "Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits; server_max_window_bits=10, permessage-deflate; client_max_window_bits" =!=
         `Sec-WebSocket-Extensions`(Vector(
-          WebSocketExtension("permessage-deflate", Map("client_max_window_bits" → "", "server_max_window_bits" → "10")),
-          WebSocketExtension("permessage-deflate", Map("client_max_window_bits" → ""))))
+          WebSocketExtension("permessage-deflate", Map("client_max_window_bits" -> "", "server_max_window_bits" -> "10")),
+          WebSocketExtension("permessage-deflate", Map("client_max_window_bits" -> ""))))
     }
     "Sec-WebSocket-Key" in {
       "Sec-WebSocket-Key: c2Zxb3JpbmgyMzA5dGpoMDIzOWdlcm5vZ2luCg==" =!= `Sec-WebSocket-Key`("c2Zxb3JpbmgyMzA5dGpoMDIzOWdlcm5vZ2luCg==")
@@ -501,6 +512,27 @@ class HttpHeaderSpec extends FreeSpec with Matchers {
         `Set-Cookie`(HttpCookie("foo", "bar", domain = Some("example.com"), path = Some("/this is a path with blanks"),
           extension = Some("extension with blanks"))).renderedTo(
           "foo=bar; Domain=example.com; Path=/this is a path with blanks; extension with blanks")
+
+      // SameSite values
+      "Set-Cookie: name=123; SameSite=Lax" =!=
+        `Set-Cookie`(HttpCookie("name", "123").withSameSite(SameSite.Lax))
+      "Set-Cookie: name=123; SameSite=Strict" =!=
+        `Set-Cookie`(HttpCookie("name", "123").withSameSite(SameSite.Strict))
+      "Set-Cookie: name=123; SameSite=None" =!=
+        `Set-Cookie`(HttpCookie("name", "123").withSameSite(SameSite.None))
+      "Set-Cookie: name=123" =!=
+        `Set-Cookie`(HttpCookie("name", "123").withSameSite(None))
+      "Set-Cookie: name=123; SameSite=sTRIct" =!=
+        `Set-Cookie`(HttpCookie("name", "123").withSameSite(SameSite.Strict)).renderedTo("name=123; SameSite=Strict")
+      "Set-Cookie: name=123; SameSite=lAX" =!=
+        `Set-Cookie`(HttpCookie("name", "123").withSameSite(SameSite.Lax)).renderedTo("name=123; SameSite=Lax")
+      "Set-Cookie: name=123; SameSite=NONE" =!=
+        `Set-Cookie`(HttpCookie("name", "123").withSameSite(SameSite.None)).renderedTo("name=123; SameSite=None")
+      "Set-Cookie: name=123; SameSite=Wrong" =!=
+        ErrorInfo(
+          "Illegal HTTP header 'Set-Cookie': Invalid input 'W', expected OWS or same-site-value (line 1, column 20)", "name=123; SameSite=Wrong\n                   ^")
+      "Set-Cookie: name=123" =!=
+        `Set-Cookie`(HttpCookie("name", "123").withSameSite(SameSite("Wrong"))).renderedTo("name=123")
 
       // test all weekdays
       "Set-Cookie: lang=; Expires=Sun, 07 Dec 2014 00:42:55 GMT; Max-Age=12345" =!=
@@ -594,19 +626,21 @@ class HttpHeaderSpec extends FreeSpec with Matchers {
                            nonce=dcd98b7102dd2f0e8b11d0f600bfb0c093,
                            opaque=5ccc069c403ebaf9f0171e9517f40e41""".stripMarginWithNewline("\r\n") =!=
         `WWW-Authenticate`(HttpChallenge("Digest", "testrealm@host.com", Map(
-          "qop" → "auth,auth-int",
-          "nonce" → "dcd98b7102dd2f0e8b11d0f600bfb0c093", "opaque" → "5ccc069c403ebaf9f0171e9517f40e41"))).renderedTo(
-          "Digest realm=\"testrealm@host.com\",qop=\"auth,auth-int\",nonce=dcd98b7102dd2f0e8b11d0f600bfb0c093,opaque=5ccc069c403ebaf9f0171e9517f40e41")
+          "nonce" -> "dcd98b7102dd2f0e8b11d0f600bfb0c093",
+          "opaque" -> "5ccc069c403ebaf9f0171e9517f40e41",
+          "qop" -> "auth,auth-int"
+        ))).renderedTo(
+          "Digest realm=\"testrealm@host.com\",nonce=dcd98b7102dd2f0e8b11d0f600bfb0c093,opaque=5ccc069c403ebaf9f0171e9517f40e41,qop=\"auth,auth-int\"")
       "WWW-Authenticate: Basic realm=\"WallyWorld\",attr=\"val>ue\", Fancy realm=\"yeah\"" =!=
-        `WWW-Authenticate`(HttpChallenge("Basic", Some("WallyWorld"), Map("attr" → "val>ue")), HttpChallenge("Fancy", Some("yeah")))
-      "WWW-Authenticate: Basic attr=value,another=\"val>ue\"" =!=
-        `WWW-Authenticate`(HttpChallenge("Basic", None, Map("attr" → "value", "another" → "val>ue")))
+        `WWW-Authenticate`(HttpChallenge("Basic", Some("WallyWorld"), Map("attr" -> "val>ue")), HttpChallenge("Fancy", Some("yeah")))
+      "WWW-Authenticate: Basic another=\"val>ue\",attr=value" =!=
+        `WWW-Authenticate`(HttpChallenge("Basic", None, Map("another" -> "val>ue", "attr" -> "value")))
       "WWW-Authenticate: Basic attr=value" =!=
-        `WWW-Authenticate`(HttpChallenge("Basic", None, Map("attr" → "value")))
+        `WWW-Authenticate`(HttpChallenge("Basic", None, Map("attr" -> "value")))
       """WWW-Authenticate: Fancy realm="Secure Area",nonce=42""" =!=
-        `WWW-Authenticate`(HttpChallenge("Fancy", Some("Secure Area"), Map("nonce" → "42")))
+        `WWW-Authenticate`(HttpChallenge("Fancy", Some("Secure Area"), Map("nonce" -> "42")))
       """WWW-Authenticate: NTLM TlRMTVNTUAABAAAABzIAAAYABgArAAAACwALACAAAABXT1JLU1RBVElPTkRPTUFJTg==""" =!=
-        `WWW-Authenticate`(HttpChallenge("NTLM", None, Map("" → "TlRMTVNTUAABAAAABzIAAAYABgArAAAACwALACAAAABXT1JLU1RBVElPTkRPTUFJTg==")))
+        `WWW-Authenticate`(HttpChallenge("NTLM", None, Map("" -> "TlRMTVNTUAABAAAABzIAAAYABgArAAAACwALACAAAABXT1JLU1RBVElPTkRPTUFJTg==")))
     }
 
     "X-Forwarded-For" in {
@@ -738,13 +772,13 @@ class HttpHeaderSpec extends FreeSpec with Matchers {
 
       def checkContentType(headerValue: String, contentType: ContentType) = {
         val customMediaTypes: MediaTypes.FindCustom = {
-          case ("application", "json") ⇒ Some(openJson)
-          case _                       ⇒ None
+          case ("application", "json") => Some(openJson)
+          case _                       => None
         }
         val headerParserSettings = HeaderParser.Settings(customMediaTypes = customMediaTypes)
         val header = `Content-Type`(contentType)
         HttpHeader.parse("content-type", headerValue, headerParserSettings) shouldEqual ParsingResult.Ok(header, Nil)
-        header.toString shouldEqual s"Content-Type: $headerValue"
+        header.unsafeToString shouldEqual s"Content-Type: $headerValue"
       }
 
       checkContentType("application/json", ContentType.WithMissingCharset(openJson))
@@ -755,16 +789,16 @@ class HttpHeaderSpec extends FreeSpec with Matchers {
   implicit class TestLine(line: String) {
     def =!=(testHeader: TestExample) = testHeader(line)
     def <=!=(header: HttpHeader) = {
-      header.toString shouldEqual line
+      header.unsafeToString shouldEqual line
     }
     def =!=>(expectedRendering: String) = {
       val Array(name, value) = line.split(": ", 2)
       val HttpHeader.ParsingResult.Ok(header, Nil) = HttpHeader.parse(name, value)
-      header.toString shouldEqual header.renderedTo(expectedRendering).rendering("")
+      header.unsafeToString shouldEqual header.renderedTo(expectedRendering).rendering("")
     }
   }
-  sealed trait TestExample extends (String ⇒ Unit)
-  implicit class TestHeader(val header: HttpHeader) extends TestExample { outer ⇒
+  sealed trait TestExample extends (String => Unit)
+  implicit class TestHeader(val header: HttpHeader) extends TestExample { outer =>
     def apply(line: String) = {
       val Array(name, value) = line.split(": ", 2)
       val parseResult = HttpHeader.parse(name, value, settings)
@@ -772,7 +806,7 @@ class HttpHeaderSpec extends FreeSpec with Matchers {
       val HttpHeader.ParsingResult.Ok(parsedHeader, Nil) = parseResult
       try parsedHeader should equal(header)
       catch {
-        case e: TestFailedException if parsedHeader.toString == header.toString ⇒
+        case e: TestFailedException if parsedHeader.toString == header.unsafeToString =>
           def className[T](t: T): String = scala.reflect.NameTransformer.decode(t.getClass.getName)
           throw new AssertionError(s"Test equals failed with equal toString. parsedHeader class was ${className(parsedHeader)}, " +
             s"header class was ${className(header)}", e)
@@ -784,8 +818,8 @@ class HttpHeaderSpec extends FreeSpec with Matchers {
       new TestHeader(header) {
         override def rendering(line: String): String =
           header match {
-            case x: ModeledHeader ⇒ x.name + ": " + expectedRendering
-            case _                ⇒ expectedRendering
+            case x: ModeledHeader => x.name + ": " + expectedRendering
+            case _                => expectedRendering
           }
 
         override def settings: Settings = outer.settings
@@ -809,11 +843,11 @@ class HttpHeaderSpec extends FreeSpec with Matchers {
 
   def renderFromHeaderTo(header: TestHeader, line: String): Matcher[HttpHeader.ParsingResult] =
     Matcher {
-      case HttpHeader.ParsingResult.Ok(h, Nil) ⇒
+      case HttpHeader.ParsingResult.Ok(h, Nil) =>
         MatchResult(
-          h.toString === header.rendering(line),
-          s"doesn't render to '${header.rendering(line)}' but '${h.toString}'", "XXX")
-      case result ⇒
+          h.unsafeToString === header.rendering(line),
+          s"doesn't render to '${header.rendering(line)}' but '${h.unsafeToString}'", "XXX")
+      case result =>
         val info = result.errors.head
         fail(s"Input `${header.header}` failed to parse:\n${info.summary}\n${info.detail}")
     }

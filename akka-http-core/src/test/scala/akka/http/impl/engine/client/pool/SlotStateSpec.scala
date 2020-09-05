@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2018-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.engine.client.pool
@@ -11,18 +11,28 @@ import akka.http.impl.engine.client.PoolFlow
 import akka.http.impl.engine.client.PoolFlow.RequestContext
 import akka.http.impl.engine.client.pool.SlotState._
 import akka.http.scaladsl.Http
-import akka.http.scaladsl.model.{ HttpMethods, HttpRequest, HttpResponse, headers }
+import akka.http.scaladsl.model.ContentTypes
+import akka.http.scaladsl.model.HttpEntity
+import akka.http.scaladsl.model.{ HttpRequest, HttpResponse, headers }
 import akka.http.scaladsl.settings.ConnectionPoolSettings
-import akka.stream.testkit.Utils.TE
+import akka.stream.scaladsl.Source
 import akka.testkit.AkkaSpec
+import akka.util.ByteString
 
-import scala.concurrent.{ Future, Promise }
+import scala.concurrent.Promise
 import scala.util.Try
 
 class SlotStateSpec extends AkkaSpec {
   val outgoingConnection = Http.OutgoingConnection(
     InetSocketAddress.createUnresolved("127.0.0.1", 1234),
     InetSocketAddress.createUnresolved("127.0.0.1", 5678))
+
+  val TheRequestContext =
+    RequestContext(
+      HttpRequest(
+        entity = HttpEntity(ContentTypes.`application/octet-stream`, Source.single(ByteString("test")))),
+      Promise[HttpResponse](), 0
+    )
 
   "The new connection pool slot state machine" should {
     "successfully complete a 'happy path' request" in {
@@ -31,11 +41,12 @@ class SlotStateSpec extends AkkaSpec {
       state = context.expectOpenConnection {
         state.onPreConnect(context)
       }
-      state = state.onNewRequest(context, RequestContext(HttpRequest(), Promise[HttpResponse], 0))
+      state = state.onNewRequest(context, TheRequestContext)
 
       state = state.onConnectionAttemptSucceeded(context, outgoingConnection)
 
-      context.expectRequestDispatchToConnection()
+      state should be(PushingRequestToConnection(TheRequestContext))
+      state = state.onRequestDispatched(context)
 
       state = state.onRequestEntityCompleted(context)
       state = state.onResponseReceived(context, HttpResponse())
@@ -45,7 +56,7 @@ class SlotStateSpec extends AkkaSpec {
       state should be(Idle)
 
       state = state.onConnectionCompleted(context)
-      state should be(Unconnected)
+      state should be(ToBeClosed)
     }
 
     "allow postponing completing the request until just after the response was received" in {
@@ -54,11 +65,12 @@ class SlotStateSpec extends AkkaSpec {
       state = context.expectOpenConnection {
         state.onPreConnect(context)
       }
-      state = state.onNewRequest(context, RequestContext(HttpRequest(), Promise[HttpResponse], 0))
+      state = state.onNewRequest(context, TheRequestContext)
 
       state = state.onConnectionAttemptSucceeded(context, outgoingConnection)
 
-      context.expectRequestDispatchToConnection()
+      state should be(PushingRequestToConnection(TheRequestContext))
+      state = state.onRequestDispatched(context)
 
       state = state.onResponseReceived(context, HttpResponse())
 
@@ -76,11 +88,12 @@ class SlotStateSpec extends AkkaSpec {
       state = context.expectOpenConnection {
         state.onPreConnect(context)
       }
-      state = state.onNewRequest(context, RequestContext(HttpRequest(), Promise[HttpResponse], 0))
+      state = state.onNewRequest(context, TheRequestContext)
 
       state = state.onConnectionAttemptSucceeded(context, outgoingConnection)
 
-      context.expectRequestDispatchToConnection()
+      state should be(PushingRequestToConnection(TheRequestContext))
+      state = state.onRequestDispatched(context)
 
       state = state.onResponseReceived(context, HttpResponse())
       state = state.onResponseDispatchable(context)
@@ -92,17 +105,41 @@ class SlotStateSpec extends AkkaSpec {
       state should be(Idle)
     }
 
+    "allow postponing completing the request until just after the response was subscribed" in {
+      var state: SlotState = Unconnected
+      val context = new MockSlotContext(system.log)
+      state = context.expectOpenConnection {
+        state.onPreConnect(context)
+      }
+      state = state.onNewRequest(context, TheRequestContext)
+
+      state = state.onConnectionAttemptSucceeded(context, outgoingConnection)
+
+      state should be(PushingRequestToConnection(TheRequestContext))
+      state = state.onRequestDispatched(context)
+
+      state = state.onResponseReceived(context, HttpResponse())
+      state = state.onResponseDispatchable(context)
+      state = state.onResponseEntitySubscribed(context)
+
+      state = state.onRequestEntityCompleted(context)
+
+      state = state.onResponseEntityCompleted(context)
+      state should be(Idle)
+    }
+
     "consider a slot 'idle' only when the request has been successfully sent" in {
       var state: SlotState = Unconnected
       val context = new MockSlotContext(system.log)
       state = context.expectOpenConnection {
         state.onPreConnect(context)
       }
-      state = state.onNewRequest(context, RequestContext(HttpRequest(), Promise[HttpResponse], 0))
+      state = state.onNewRequest(context, TheRequestContext)
 
       state = state.onConnectionAttemptSucceeded(context, outgoingConnection)
 
-      context.expectRequestDispatchToConnection()
+      state should be(PushingRequestToConnection(TheRequestContext))
+      state = state.onRequestDispatched(context)
 
       state = state.onResponseReceived(context, HttpResponse())
       state = state.onResponseDispatchable(context)
@@ -119,7 +156,8 @@ class SlotStateSpec extends AkkaSpec {
     }
   }
 
-  class MockSlotContext(log: LoggingAdapter, val settings: ConnectionPoolSettings = ConnectionPoolSettings("")) extends SlotContext {
+  class MockSlotContext(_log: LoggingAdapter, val settings: ConnectionPoolSettings = ConnectionPoolSettings("")) extends SlotContext {
+    override def log: LoggingAdapter = _log
 
     var connectionClosed = true
     var connectionOpenRequested = false
@@ -133,36 +171,13 @@ class SlotStateSpec extends AkkaSpec {
 
     override def isConnectionClosed: Boolean = connectionClosed
 
-    override def pushRequestToConnectionAndThen(request: HttpRequest, nextState: SlotState): SlotState = {
-      pushedRequest = Some(request)
-      nextState
-    }
-
     override def dispatchResponseResult(req: PoolFlow.RequestContext, result: Try[HttpResponse]): Unit =
       dispatchedResponse = Some(result)
 
     override def willCloseAfter(response: HttpResponse): Boolean =
       response.header[headers.Connection].exists(_.hasClose)
 
-    override def debug(message: String): Unit =
-      log.debug(message)
-
-    override def debug(message: String, arg1: AnyRef): Unit =
-      log.debug(message, arg1)
-
-    override def debug(message: String, arg1: AnyRef, arg2: AnyRef): Unit =
-      log.debug(message, arg1, arg2)
-
-    override def debug(message: String, arg1: AnyRef, arg2: AnyRef, arg3: AnyRef): Unit =
-      log.debug(message, arg1, arg2, arg3)
-
-    override def warning(message: String): Unit =
-      log.warning(message)
-
-    override def warning(message: String, arg1: AnyRef): Unit =
-      log.warning(message, arg1)
-
-    def expectOpenConnection[T](cb: ⇒ T) = {
+    def expectOpenConnection[T](cb: => T) = {
       connectionClosed should be(true)
       connectionOpenRequested should be(false)
 
@@ -173,13 +188,6 @@ class SlotStateSpec extends AkkaSpec {
       connectionClosed = false
       res
     }
-
-    def expectRequestDispatchToConnection() = {
-      val request = pushedRequest.get
-      pushedRequest = None
-      request
-    }
-
   }
 }
 

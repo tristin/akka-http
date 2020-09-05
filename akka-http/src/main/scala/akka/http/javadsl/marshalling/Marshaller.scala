@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.javadsl.marshalling
@@ -13,12 +13,10 @@ import akka.http.scaladsl
 import akka.http.scaladsl.marshalling
 import akka.http.scaladsl.marshalling._
 import akka.http.scaladsl.model.{ FormData, HttpCharset }
-import akka.japi.Util
 import akka.util.ByteString
 
 import scala.concurrent.ExecutionContext
 import scala.annotation.unchecked.uncheckedVariance
-import scala.language.implicitConversions
 
 object Marshaller {
 
@@ -68,12 +66,12 @@ object Marshaller {
   // TODO make sure these are actually usable in a sane way
   def wrapEntity[A, C](f: function.BiFunction[ExecutionContext, C, A], m: Marshaller[A, RequestEntity], mediaType: MediaType): Marshaller[C, RequestEntity] = {
     val scalaMarshaller = m.asScalaCastOutput
-    fromScala(scalaMarshaller.wrapWithEC(mediaType.asScala) { ctx ⇒ c: C ⇒ f(ctx, c) }(ContentTypeOverrider.forEntity))
+    fromScala(scalaMarshaller.wrapWithEC(mediaType.asScala) { ctx => c: C => f(ctx, c) }(ContentTypeOverrider.forEntity))
   }
 
   def wrapEntity[A, C, E <: RequestEntity](f: function.Function[C, A], m: Marshaller[A, E], mediaType: MediaType): Marshaller[C, RequestEntity] = {
     val scalaMarshaller = m.asScalaCastOutput
-    fromScala(scalaMarshaller.wrap(mediaType.asScala)((in: C) ⇒ f.apply(in))(ContentTypeOverrider.forEntity))
+    fromScala(scalaMarshaller.wrap(mediaType.asScala)((in: C) => f.apply(in))(ContentTypeOverrider.forEntity))
   }
 
   def entityToOKResponse[A](m: Marshaller[A, _ <: RequestEntity]): Marshaller[A, HttpResponse] = {
@@ -85,11 +83,11 @@ object Marshaller {
   }
 
   def entityToResponse[A](status: StatusCode, headers: java.lang.Iterable[HttpHeader], m: Marshaller[A, _ <: RequestEntity]): Marshaller[A, HttpResponse] = {
-    fromScala(marshalling.Marshaller.fromToEntityMarshaller[A](status.asScala, Util.immutableSeq(headers).map(_.asScala))(m.asScalaCastOutput)) // TODO can we avoid the map() ?
+    fromScala(marshalling.Marshaller.fromToEntityMarshaller[A](status.asScala, headers.asScala)(m.asScalaCastOutput))
   }
 
   def entityToOKResponse[A](headers: java.lang.Iterable[HttpHeader], m: Marshaller[A, _ <: RequestEntity]): Marshaller[A, HttpResponse] = {
-    fromScala(marshalling.Marshaller.fromToEntityMarshaller[A](headers = Util.immutableSeq(headers).map(_.asScala))(m.asScalaCastOutput)) // TODO avoid the map()
+    fromScala(marshalling.Marshaller.fromToEntityMarshaller[A](headers = headers.asScala)(m.asScalaCastOutput))
   }
 
   // these are methods not varargs to avoid call site warning about unchecked type params
@@ -98,7 +96,7 @@ object Marshaller {
    * Helper for creating a "super-marshaller" from a number of "sub-marshallers".
    * Content-negotiation determines, which "sub-marshaller" eventually gets to do the job.
    *
-   * Please note that all passed in marshallers will actualy be invoked in order to get the Marshalling object
+   * Please note that all passed in marshallers will actually be invoked in order to get the Marshalling object
    * out of them, and later decide which of the marshallings should be returned. This is by-design,
    * however in ticket as discussed in ticket https://github.com/akka/akka-http/issues/243 it MAY be
    * changed in later versions of Akka HTTP.
@@ -111,7 +109,7 @@ object Marshaller {
    * Helper for creating a "super-marshaller" from a number of "sub-marshallers".
    * Content-negotiation determines, which "sub-marshaller" eventually gets to do the job.
    *
-   * Please note that all marshallers will actualy be invoked in order to get the Marshalling object
+   * Please note that all marshallers will actually be invoked in order to get the Marshalling object
    * out of them, and later decide which of the marshallings should be returned. This is by-design,
    * however in ticket as discussed in ticket https://github.com/akka/akka-http/issues/243 it MAY be
    * changed in later versions of Akka HTTP.
@@ -124,7 +122,7 @@ object Marshaller {
    * Helper for creating a "super-marshaller" from a number of "sub-marshallers".
    * Content-negotiation determines, which "sub-marshaller" eventually gets to do the job.
    *
-   * Please note that all marshallers will actualy be invoked in order to get the Marshalling object
+   * Please note that all marshallers will actually be invoked in order to get the Marshalling object
    * out of them, and later decide which of the marshallings should be returned. This is by-design,
    * however in ticket as discussed in ticket https://github.com/akka/akka-http/issues/243 it MAY be
    * changed in later versions of Akka HTTP.
@@ -137,7 +135,7 @@ object Marshaller {
    * Helper for creating a "super-marshaller" from a number of "sub-marshallers".
    * Content-negotiation determines, which "sub-marshaller" eventually gets to do the job.
    *
-   * Please note that all marshallers will actualy be invoked in order to get the Marshalling object
+   * Please note that all marshallers will actually be invoked in order to get the Marshalling object
    * out of them, and later decide which of the marshallings should be returned. This is by-design,
    * however in ticket as discussed in ticket https://github.com/akka/akka-http/issues/243 it MAY be
    * changed in later versions of Akka HTTP.
@@ -150,7 +148,7 @@ object Marshaller {
    * Helper for creating a "super-marshaller" from a number of "sub-marshallers".
    * Content-negotiation determines, which "sub-marshaller" eventually gets to do the job.
    *
-   * Please note that all marshallers will actualy be invoked in order to get the Marshalling object
+   * Please note that all marshallers will actually be invoked in order to get the Marshalling object
    * out of them, and later decide which of the marshallings should be returned. This is by-design,
    * however in ticket as discussed in ticket https://github.com/akka/akka-http/issues/243 it MAY be
    * changed in later versions of Akka HTTP.
@@ -175,7 +173,7 @@ object Marshaller {
    * Helper for creating a synchronous [[Marshaller]] to non-negotiable content from the given function.
    */
   def opaque[A, B](f: function.Function[A, B]): Marshaller[A, B] =
-    fromScala(scaladsl.marshalling.Marshaller.opaque[A, B] { a ⇒ f.apply(a) })
+    fromScala(scaladsl.marshalling.Marshaller.opaque[A, B] { a => f.apply(a) })
 
   implicit def asScalaToResponseMarshaller[T](m: Marshaller[T, akka.http.javadsl.model.HttpResponse]): ToResponseMarshaller[T] =
     m.asScala.map(_.asScala)

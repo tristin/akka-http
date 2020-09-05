@@ -4,13 +4,13 @@
 
 ## Signature
 
-@@signature [PathDirectives.scala]($akka-http$/akka-http/src/main/scala/akka/http/scaladsl/server/directives/PathDirectives.scala) { #pathSingleSlash }
+@@signature [PathDirectives.scala](/akka-http/src/main/scala/akka/http/scaladsl/server/directives/PathDirectives.scala) { #pathSingleSlash }
 
 @@@
 
 ## Description
 
-Only passes the request to its inner route if the unmatched path of the @unidoc[RequestContext]
+Only passes the request to its inner route if the unmatched path of the @apidoc[RequestContext]
 contains exactly one single slash.
 
 This directive is a simple alias for `pathPrefix(PathEnd)` and is mostly used for matching requests to the root URI

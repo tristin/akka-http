@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.javadsl.model;
@@ -7,13 +7,9 @@ package akka.http.javadsl.model;
 import akka.http.scaladsl.model.IllegalUriException;
 import akka.japi.Pair;
 import org.junit.Test;
-import org.scalatest.junit.JUnitSuite;
+import org.scalatestplus.junit.JUnitSuite;
 
 import java.util.Optional;
-import java.util.concurrent.TimeoutException;
-
-import static akka.http.javadsl.model.Uri.RELAXED;
-import static akka.http.javadsl.model.Uri.STRICT;
 import static org.junit.Assert.assertEquals;
 
 public class UriTest extends JUnitSuite {
@@ -154,7 +150,7 @@ public class UriTest extends JUnitSuite {
     //query component (name: "a", and value: "b") is equal to parsed query string "a=b"
     assertEquals(Query.create(Pair.create("a", "b")), strict("a=b"));
 
-    assertEquals(Query.create(Pair.create("", "")), strict(""));
+    assertEquals(Query.EMPTY, strict(""));
     assertEquals(Query.create(Pair.create("a", "")), strict("a"));
     assertEquals(Query.create(Pair.create("a", "")), strict("a="));
     assertEquals(Query.create(Pair.create("a", " ")), strict("a=+"));
@@ -241,7 +237,7 @@ public class UriTest extends JUnitSuite {
   @Test
   public void testRelaxedMode() {
     //#query-relaxed-mode
-    assertEquals(Query.create(Pair.create("", "")), relaxed(""));
+    assertEquals(Query.EMPTY, relaxed(""));
     assertEquals(Query.create(Pair.create("a", "")), relaxed("a"));
     assertEquals(Query.create(Pair.create("a", "")), relaxed("a="));
     assertEquals(Query.create(Pair.create("a", " ")), relaxed("a=+"));

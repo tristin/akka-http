@@ -1,25 +1,27 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.testkit
 
-import scala.util.Try
-import scala.concurrent.{ ExecutionContext, Future, Await }
-import scala.concurrent.duration._
-import org.scalatest.Suite
-import org.scalatest.matchers.Matcher
-import akka.stream.Materializer
 import akka.http.scaladsl.model.HttpEntity
 import akka.http.scaladsl.unmarshalling.FromEntityUnmarshaller
+import akka.stream.Materializer
+import org.scalatest.Suite
+import org.scalatest.matchers.Matcher
+
+import scala.concurrent.{ Await, ExecutionContext, Future }
+import scala.util.Try
+import org.scalatest.matchers
 
 trait ScalatestUtils extends MarshallingTestUtils {
-  import org.scalatest.Matchers._
+  import matchers.should.Matchers._
+
   def evaluateTo[T](value: T): Matcher[Future[T]] =
-    equal(value).matcher[T] compose (x ⇒ Await.result(x, 1.second))
+    equal(value).matcher[T] compose (x => Await.result(x, marshallingTimeout))
 
   def haveFailedWith(t: Throwable): Matcher[Future[_]] =
-    equal(t).matcher[Throwable] compose (x ⇒ Await.result(x.failed, 1.second))
+    equal(t).matcher[Throwable] compose (x => Await.result(x.failed, marshallingTimeout))
 
   def unmarshalToValue[T: FromEntityUnmarshaller](value: T)(implicit ec: ExecutionContext, mat: Materializer): Matcher[HttpEntity] =
     equal(value).matcher[T] compose (unmarshalValue(_))
@@ -28,4 +30,4 @@ trait ScalatestUtils extends MarshallingTestUtils {
     equal(value).matcher[Try[T]] compose (unmarshal(_))
 }
 
-trait ScalatestRouteTest extends RouteTest with TestFrameworkInterface.Scalatest with ScalatestUtils { this: Suite ⇒ }
+trait ScalatestRouteTest extends RouteTest with TestFrameworkInterface.Scalatest with ScalatestUtils { this: Suite => }

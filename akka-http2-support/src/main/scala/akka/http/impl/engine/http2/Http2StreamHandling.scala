@@ -1,30 +1,39 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.engine.http2
 
-import akka.NotUsed
 import akka.annotation.InternalApi
 import akka.http.impl.engine.http2.Http2Protocol.ErrorCode
 import akka.http.scaladsl.model.http2.PeerClosedStreamException
-import akka.http.scaladsl.settings.Http2ServerSettings
+import akka.http.scaladsl.settings.Http2CommonSettings
 import akka.stream.scaladsl.Source
 import akka.stream.stage.{ GraphStageLogic, OutHandler, StageLogging }
 import akka.util.ByteString
 
 import scala.collection.immutable
-
 import FrameEvent._
 
-/** INTERNAL API */
+import scala.util.control.NoStackTrace
+
+/**
+ * INTERNAL API
+ *
+ * Handles the 'incoming' side of HTTP/2 streams.
+ * Accepts `FrameEvent`s from the network side and emits `ByteHttp2SubStream`s for streams
+ * to be handled by the Akka HTTP layer.
+ *
+ * Mixed into the Http2ServerDemux graph logic.
+ */
 @InternalApi
-private[http2] trait Http2StreamHandling { self: GraphStageLogic with StageLogging ⇒
+private[http2] trait Http2StreamHandling { self: GraphStageLogic with StageLogging =>
   // required API from demux
   def multiplexer: Http2Multiplexer
-  def settings: Http2ServerSettings
+  def settings: Http2CommonSettings
   def pushGOAWAY(errorCode: ErrorCode, debug: String): Unit
   def dispatchSubstream(sub: Http2SubStream): Unit
+  def isUpgraded: Boolean
 
   def flowController: IncomingFlowController = IncomingFlowController.default(settings)
 
@@ -35,57 +44,119 @@ private[http2] trait Http2StreamHandling { self: GraphStageLogic with StageLoggi
 
   private def streamFor(streamId: Int): IncomingStreamState =
     incomingStreams.get(streamId) match {
-      case Some(state) ⇒ state
-      case None ⇒
+      case Some(state) => state
+      case None =>
         if (streamId <= largestIncomingStreamId) Closed // closed streams are never put into the map
-        else {
+        else if (isUpgraded && streamId == 1) {
+          // Stream 1 is implicitly "half-closed" from the client toward the server (see Section 5.1), since the request is completed as an HTTP/1.1 request
+          // https://http2.github.io/http2-spec/#discover-http
           largestIncomingStreamId = streamId
-          incomingStreams += streamId → Idle
+          incomingStreams += streamId -> HalfClosedRemote
+          HalfClosedRemote
+        } else {
+          largestIncomingStreamId = streamId
+          incomingStreams += streamId -> Idle
           Idle
         }
     }
   def handleStreamEvent(e: StreamFrameEvent): Unit = {
-    val newState = streamFor(e.streamId).handle(e)
-    if (newState == Closed) incomingStreams -= e.streamId
-    else incomingStreams += e.streamId → newState
+    updateState(e.streamId, _.handle(e))
   }
+
+  def handleOutgoingCreated(stream: Http2SubStream): Unit =
+    updateState(stream.streamId, _.handleOutgoingCreated(stream))
+
+  // Called by the outgoing stream multiplexer when that side of the stream is ended.
+  def handleOutgoingEnded(streamId: Int): Unit = {
+    updateState(streamId, _.handleOutgoingEnded())
+  }
+
+  private def updateState(streamId: Int, handle: IncomingStreamState => IncomingStreamState): Unit = {
+    val oldState = streamFor(streamId)
+    val newState = handle(oldState)
+    newState match {
+      case Closed   => incomingStreams -= streamId
+      case newState => incomingStreams += streamId -> newState
+    }
+    log.debug(s"Incoming stream state updated for [$streamId] ${oldState.stateName} -> ${newState.stateName}")
+  }
+  /** Called to cleanup any state when the connection is torn down */
+  def shutdownStreamHandling(): Unit = incomingStreams.keys.foreach(id => updateState(id, _.shutdown()))
   def resetStream(streamId: Int, errorCode: ErrorCode): Unit = {
-    // FIXME: put this stream into an extra state where we allow some frames still to be received
     incomingStreams -= streamId
     multiplexer.pushControlFrame(RstStreamFrame(streamId, errorCode))
   }
 
-  sealed abstract class IncomingStreamState { _: Product ⇒
+  /**
+   * https://http2.github.io/http2-spec/#StreamStates
+   */
+  sealed abstract class IncomingStreamState { _: Product =>
     def handle(event: StreamFrameEvent): IncomingStreamState
 
     def stateName: String = productPrefix
+    def handleOutgoingCreated(stream: Http2SubStream): IncomingStreamState = {
+      log.warning(s"handleOutgoingCreated received unexpectedly in state $stateName. This indicates a bug in Akka HTTP, please report it to the issue tracker.")
+      this
+    }
+    def handleOutgoingEnded(): IncomingStreamState = {
+      log.warning(s"handleOutgoingEnded received unexpectedly in state $stateName. This indicates a bug in Akka HTTP, please report it to the issue tracker.")
+      this
+    }
     def receivedUnexpectedFrame(e: StreamFrameEvent): IncomingStreamState = {
       pushGOAWAY(ErrorCode.PROTOCOL_ERROR, s"Received unexpected frame of type ${e.frameTypeName} for stream ${e.streamId} in state $stateName")
       Closed
     }
+
+    protected def expectIncomingStream(
+      event:           StreamFrameEvent,
+      nextStateEmpty:  IncomingStreamState,
+      nextStateStream: IncomingStreamBuffer => IncomingStreamState,
+      mapStream:       Http2SubStream => Http2SubStream            = identity): IncomingStreamState =
+      event match {
+        case frame @ ParsedHeadersFrame(streamId, endStream, _, _) =>
+          val (data, nextState) =
+            if (endStream)
+              (Source.empty, nextStateEmpty)
+            else {
+              val subSource = new SubSourceOutlet[ByteString](s"substream-out-$streamId")
+              (Source.fromGraph(subSource.source), nextStateStream(new IncomingStreamBuffer(streamId, subSource)))
+            }
+
+          // FIXME: after multiplexer PR is merged
+          // prioInfo.foreach(multiplexer.updatePriority)
+          dispatchSubstream(mapStream(ByteHttp2SubStream(frame, data)))
+          nextState
+
+        case x => receivedUnexpectedFrame(x)
+      }
+
+    /** Called to cleanup any state when the connection is torn down */
+    def shutdown(): IncomingStreamState
   }
   case object Idle extends IncomingStreamState {
-    def handle(event: StreamFrameEvent): IncomingStreamState = event match {
-      case frame @ ParsedHeadersFrame(streamId, endStream, headers, prioInfo) ⇒
-        val (data: Source[ByteString, NotUsed], nextState) =
-          if (endStream) (Source.empty, HalfClosedRemote)
-          else {
-            val subSource = new SubSourceOutlet[ByteString](s"substream-out-$streamId")
-            (Source.fromGraph(subSource.source), Open(new IncomingStreamBuffer(streamId, subSource)))
-          }
-
-        // FIXME: after multiplexer PR is merged
-        // prioInfo.foreach(multiplexer.updatePriority)
-        dispatchSubstream(ByteHttp2SubStream(frame, data))
-        nextState
-
-      case x ⇒ receivedUnexpectedFrame(x)
-    }
+    def handle(event: StreamFrameEvent): IncomingStreamState = expectIncomingStream(event, HalfClosedRemote, ReceivingDataFirst)
+    override def handleOutgoingCreated(stream: Http2SubStream): IncomingStreamState = SendingData(stream)
+    override def shutdown(): IncomingStreamState = Closed
   }
-  sealed abstract class ReceivingData(afterEndStreamReceived: IncomingStreamState) extends IncomingStreamState { _: Product ⇒
+  case class ReceivingDataFirst(buffer: IncomingStreamBuffer) extends ReceivingData(HalfClosedRemote) {
+    override def handleOutgoingCreated(stream: Http2SubStream): IncomingStreamState = Open(buffer)
+    override def handleOutgoingEnded(): IncomingStreamState = Closed
+
+    override protected def onReset(streamId: Int): Unit = multiplexer.cancelSubStream(streamId)
+  }
+  case class SendingData(outgoingStream: Http2SubStream) extends IncomingStreamState {
+    override def handle(event: StreamFrameEvent): IncomingStreamState = expectIncomingStream(event, HalfClosedRemote, Open, _.withCorrelationAttributes(outgoingStream.correlationAttributes))
+    override def handleOutgoingEnded(): IncomingStreamState = SendingDataHalfClosedLocal(outgoingStream)
+    override def shutdown(): IncomingStreamState = Closed
+  }
+  case class SendingDataHalfClosedLocal(outgoingStream: Http2SubStream) extends IncomingStreamState {
+    override def handle(event: StreamFrameEvent): IncomingStreamState = expectIncomingStream(event, Closed, HalfClosedLocal, _.withCorrelationAttributes(outgoingStream.correlationAttributes))
+    override def shutdown(): IncomingStreamState = Closed
+  }
+  sealed abstract class ReceivingData(afterEndStreamReceived: IncomingStreamState) extends IncomingStreamState { _: Product =>
     protected def buffer: IncomingStreamBuffer
     def handle(event: StreamFrameEvent): IncomingStreamState = event match {
-      case d: DataFrame ⇒
+      case d: DataFrame =>
         outstandingConnectionLevelWindow -= d.sizeInWindow
         totalBufferedData += d.payload.size // padding can be seen as instantly discarded
 
@@ -102,36 +173,82 @@ private[http2] trait Http2StreamHandling { self: GraphStageLogic with StageLoggi
           buffer.onDataFrame(d).getOrElse(
             maybeFinishStream(d.endStream))
         }
-      case r: RstStreamFrame ⇒
+      case r: RstStreamFrame =>
         buffer.onRstStreamFrame(r)
-        multiplexer.cancelSubStream(r.streamId)
+        onReset(r.streamId)
         Closed
 
-      case h: ParsedHeadersFrame ⇒
+      case h: ParsedHeadersFrame =>
         // ignored
-        log.debug(s"Ignored intermediate HEADERS frame: $h")
 
-        if (h.endStream) buffer.onDataFrame(DataFrame(h.streamId, endStream = true, ByteString.empty)) // simulate end stream by empty dataframe
+        if (h.endStream) {
+          buffer.onDataFrame(DataFrame(h.streamId, endStream = true, ByteString.empty)) // simulate end stream by empty dataframe
+          log.debug(s"Ignored trailing HEADERS frame: $h")
+        } else pushGOAWAY(Http2Protocol.ErrorCode.PROTOCOL_ERROR, "Got unexpected mid-stream HEADERS frame")
+
         maybeFinishStream(h.endStream)
+
+      case _ => throw new IllegalStateException(s"Unexpected frame type ${event.frameTypeName} in state ${this.getClass.getName}.")
     }
+    protected def onReset(streamId: Int): Unit
 
     protected def maybeFinishStream(endStream: Boolean): IncomingStreamState =
       if (endStream) afterEndStreamReceived else this
-  }
-  // on the incoming side there's (almost) no difference between Open and HalfClosedLocal
-  case class Open(buffer: IncomingStreamBuffer) extends ReceivingData(HalfClosedRemote)
-  // currently unused: we never close a stream before the peer does
-  // case class HalfClosedLocal(buffer: Buffer) extends ReceivingData(Closed)
-  case object HalfClosedRemote extends IncomingStreamState {
-    def handle(event: StreamFrameEvent): IncomingStreamState = event match {
-      case r: RstStreamFrame ⇒
-        multiplexer.cancelSubStream(r.streamId)
-        Closed
-      case _ ⇒ receivedUnexpectedFrame(event)
+
+    override def shutdown(): IncomingStreamState = {
+      buffer.shutdown()
+      Closed
     }
   }
+
+  // on the incoming side there's (almost) no difference between Open and HalfClosedLocal
+  case class Open(buffer: IncomingStreamBuffer) extends ReceivingData(HalfClosedRemote) {
+    override def handleOutgoingEnded(): IncomingStreamState = HalfClosedLocal(buffer)
+
+    override protected def onReset(streamId: Int): Unit =
+      multiplexer.cancelSubStream(streamId)
+  }
+  /**
+   * We have closed the outgoing stream, but the incoming stream is still going.
+   */
+  case class HalfClosedLocal(buffer: IncomingStreamBuffer) extends ReceivingData(Closed) {
+    override protected def onReset(streamId: Int): Unit = {
+      // nothing further to do as we're already half-closed
+    }
+  }
+
+  /**
+   * They have closed the incoming stream, but the outgoing stream is still going.
+   */
+  case object HalfClosedRemote extends IncomingStreamState {
+    def handle(event: StreamFrameEvent): IncomingStreamState = event match {
+      case r: RstStreamFrame =>
+        multiplexer.cancelSubStream(r.streamId)
+        Closed
+      case _ => receivedUnexpectedFrame(event)
+    }
+
+    override def handleOutgoingCreated(stream: Http2SubStream): IncomingStreamState =
+      // other side has sent its complete message and now we use the channel for the response
+      this
+    override def handleOutgoingEnded(): IncomingStreamState = Closed
+    override def shutdown(): IncomingStreamState = Closed
+  }
   case object Closed extends IncomingStreamState {
-    def handle(event: StreamFrameEvent): IncomingStreamState = receivedUnexpectedFrame(event)
+
+    override def handleOutgoingCreated(stream: Http2SubStream): IncomingStreamState = this
+    override def handleOutgoingEnded(): IncomingStreamState = this
+
+    def handle(event: StreamFrameEvent): IncomingStreamState = event match {
+      // https://http2.github.io/http2-spec/#StreamStates
+      // Endpoints MUST ignore WINDOW_UPDATE or RST_STREAM frames received in this state,
+      case _: RstStreamFrame | _: WindowUpdateFrame =>
+        this
+      case _ =>
+        receivedUnexpectedFrame(event)
+    }
+
+    override def shutdown(): IncomingStreamState = this
   }
 
   class IncomingStreamBuffer(streamId: Int, outlet: SubSourceOutlet[ByteString]) extends OutHandler {
@@ -201,9 +318,14 @@ private[http2] trait Http2StreamHandling { self: GraphStageLogic with StageLoggi
           s"remaining window space now $outstandingStreamWindow, buffered: ${buffer.size}, " +
           s"remaining connection window space now $outstandingConnectionLevelWindow, total buffered: $totalBufferedData")
     }
+
+    def shutdown(): Unit = outlet.fail(Http2StreamHandling.ConnectionWasAbortedException)
   }
 
   // needed once PUSH_PROMISE support was added
   //case object ReservedLocal extends IncomingStreamState
   //case object ReservedRemote extends IncomingStreamState
+}
+private[http2] object Http2StreamHandling {
+  val ConnectionWasAbortedException = new IllegalStateException("The HTTP/2 connection was shut down while the request was still ongoing") with NoStackTrace
 }

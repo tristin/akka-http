@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2017-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl
@@ -9,13 +9,14 @@ import akka.http.scaladsl.model._
 import akka.http.scaladsl.model.HttpMethods._
 import akka.stream.ActorMaterializer
 import com.typesafe.config.{ Config, ConfigFactory }
-import org.scalatest.{ Matchers, WordSpec }
 import scala.concurrent.duration._
 import scala.concurrent.Await
 import org.scalatest.BeforeAndAfterAll
 import akka.testkit._
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
 
-class ClientSpec extends WordSpec with Matchers with BeforeAndAfterAll {
+class ClientSpec extends AnyWordSpec with Matchers with BeforeAndAfterAll {
   val testConf: Config = ConfigFactory.parseString("""
     akka.loggers = ["akka.testkit.TestEventListener"]
     akka.loglevel = ERROR
@@ -31,8 +32,8 @@ class ClientSpec extends WordSpec with Matchers with BeforeAndAfterAll {
   "HTTP Client" should {
 
     "reuse connection pool" in {
-      val (hostname, port) = SocketUtil.temporaryServerHostnameAndPort()
-      val bindingFuture = Http().bindAndHandleSync(_ ⇒ HttpResponse(), hostname, port)
+      val (hostname, port) = SocketUtil2.temporaryServerHostnameAndPort()
+      val bindingFuture = Http().newServerAt(hostname, port).bindSync(_ => HttpResponse())
       val binding = Await.result(bindingFuture, 3.seconds.dilated)
 
       val respFuture = Http().singleRequest(HttpRequest(POST, s"http://$hostname:$port/"))

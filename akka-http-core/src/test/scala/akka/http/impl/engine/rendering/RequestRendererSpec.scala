@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.engine.rendering
@@ -9,7 +9,7 @@ import java.net.InetSocketAddress
 
 import scala.concurrent.duration._
 import scala.concurrent.Await
-import org.scalatest.{ BeforeAndAfterAll, FreeSpec, Matchers }
+import org.scalatest.BeforeAndAfterAll
 import org.scalatest.matchers.Matcher
 import akka.actor.ActorSystem
 import akka.event.NoLogging
@@ -22,8 +22,10 @@ import akka.stream.ActorMaterializer
 import HttpEntity._
 import HttpMethods._
 import akka.testkit._
+import org.scalatest.freespec.AnyFreeSpec
+import org.scalatest.matchers.should.Matchers
 
-class RequestRendererSpec extends FreeSpec with Matchers with BeforeAndAfterAll {
+class RequestRendererSpec extends AnyFreeSpec with Matchers with BeforeAndAfterAll {
   val testConf: Config = ConfigFactory.parseString("""
     akka.event-handlers = ["akka.testkit.TestEventListener"]
     akka.loglevel = WARNING""")
@@ -330,7 +332,7 @@ class RequestRendererSpec extends FreeSpec with Matchers with BeforeAndAfterAll 
     def awaitAtMost: FiniteDuration = 4.seconds.dilated
 
     def renderTo(expected: String): Matcher[HttpRequest] =
-      equal(expected.stripMarginWithNewline("\r\n")).matcher[String] compose { request ⇒
+      equal(expected.stripMarginWithNewline("\r\n")).matcher[String] compose { request =>
         val byteStringSource = renderToSource(RequestRenderingContext(request, Host(serverAddress)))
         val future = byteStringSource.limit(1000).runWith(Sink.seq).map(_.reduceLeft(_ ++ _).utf8String)
         Await.result(future, awaitAtMost)

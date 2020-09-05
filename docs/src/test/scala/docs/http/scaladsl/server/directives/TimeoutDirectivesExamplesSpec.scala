@@ -1,52 +1,34 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package docs.http.scaladsl.server.directives
 
 import akka.http.scaladsl.model.{ HttpResponse, StatusCodes }
-import akka.http.scaladsl.server.Route
+import akka.http.scaladsl.server.{ Route, RoutingSpec }
 import docs.CompileOnlySpec
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.server.Directives._
-import akka.stream.ActorMaterializer
 import akka.http.scaladsl.model.HttpEntity._
 import akka.http.scaladsl.model._
+import akka.http.scaladsl.testkit.RouteTestTimeout
 import com.typesafe.config.{ Config, ConfigFactory }
 import org.scalatest.concurrent.ScalaFutures
+
 import scala.concurrent.duration._
-import scala.concurrent.{ Future, Promise }
-import akka.testkit.{ AkkaSpec, SocketUtil }
+import scala.concurrent.{ ExecutionContext, Future, Promise }
+import akka.testkit.{ AkkaSpec, SocketUtil2 }
 
-private[this] object TimeoutDirectivesInfiniteTimeoutTestConfig {
-  val testConf: Config = ConfigFactory.parseString("""
-    akka.loggers = ["akka.testkit.TestEventListener"]
-    akka.loglevel = ERROR
-    akka.stdout-loglevel = ERROR
-    windows-connection-abort-workaround-enabled = auto
-    akka.log-dead-letters = OFF
-    akka.http.server.request-timeout = infinite""")
-}
-
-class TimeoutDirectivesExamplesSpec extends AkkaSpec(TimeoutDirectivesInfiniteTimeoutTestConfig.testConf)
+class TimeoutDirectivesExamplesSpec extends RoutingSpec
   with ScalaFutures with CompileOnlySpec {
   //#testSetup
-  import system.dispatcher
-  implicit val materializer = ActorMaterializer()
 
-  def slowFuture(): Future[String] = Promise[String].future // TODO: move to Future.never in Scala 2.12
+  implicit val timeout: RouteTestTimeout = RouteTestTimeout(3.seconds)
+  override def testConfigSource: String =
+    "akka.http.server.request-timeout = infinite\n" +
+      super.testConfigSource
 
-  def runRoute(route: Route, routePath: String): HttpResponse = {
-    val (hostname, port) = SocketUtil.temporaryServerHostnameAndPort()
-    val binding = Http().bindAndHandle(route, hostname, port)
-
-    val response = Http().singleRequest(HttpRequest(uri = s"http://$hostname:$port/$routePath")).futureValue
-
-    binding.flatMap(_.unbind()).futureValue
-
-    response
-  }
-
+  def slowFuture(): Future[String] = Future.never
   //#testSetup
 
   // demonstrates that timeout is correctly set despite infinite initial value of akka.http.server.request-timeout
@@ -62,7 +44,9 @@ class TimeoutDirectivesExamplesSpec extends AkkaSpec(TimeoutDirectivesInfiniteTi
         }
 
       // check
-      runRoute(route, "timeout").status should ===(StatusCodes.ServiceUnavailable) // the timeout response
+      Get("/timeout") ~!> route ~> check {
+        status should ===(StatusCodes.ServiceUnavailable) // the timeout response
+      }
       //#withRequestTimeout-plain
     }
     "without timeout" in compileOnlySpec {
@@ -95,7 +79,9 @@ class TimeoutDirectivesExamplesSpec extends AkkaSpec(TimeoutDirectivesInfiniteTi
         }
 
       // check
-      runRoute(route, "timeout").status should ===(StatusCodes.EnhanceYourCalm) // the timeout response
+      Get("/timeout") ~!> route ~> check {
+        status should ===(StatusCodes.EnhanceYourCalm) // the timeout response
+      }
       //#withRequestTimeout-with-handler
     }
 
@@ -117,7 +103,9 @@ class TimeoutDirectivesExamplesSpec extends AkkaSpec(TimeoutDirectivesInfiniteTi
         }
 
       // check
-      runRoute(route, "timeout").status should ===(StatusCodes.EnhanceYourCalm) // the timeout response
+      Get("/timeout") ~!> route ~> check {
+        status should ===(StatusCodes.EnhanceYourCalm) // the timeout response
+      }
       //#withRequestTimeoutResponse
     }
 
@@ -129,9 +117,9 @@ class TimeoutDirectivesExamplesSpec extends AkkaSpec(TimeoutDirectivesInfiniteTi
       val route =
         path("timeout") {
           withRequestTimeout(timeout1) {
-            extractRequestTimeout { t1 ⇒
+            extractRequestTimeout { t1 =>
               withRequestTimeout(timeout2) {
-                extractRequestTimeout { t2 ⇒
+                extractRequestTimeout { t2 =>
                   complete(
                     if (t1 == timeout1 && t2 == timeout2) StatusCodes.OK
                     else StatusCodes.InternalServerError
@@ -143,39 +131,22 @@ class TimeoutDirectivesExamplesSpec extends AkkaSpec(TimeoutDirectivesInfiniteTi
         }
       //#extractRequestTimeout
 
-      runRoute(route, "timeout").status should ===(StatusCodes.OK)
+      Get("/timeout") ~!> route ~> check {
+        status should ===(StatusCodes.OK) // the timeout response
+      }
     }
   }
 
 }
 
-private[this] object TimeoutDirectivesFiniteTimeoutTestConfig {
-  val testConf: Config = ConfigFactory.parseString("""
-    akka.loggers = ["akka.testkit.TestEventListener"]
-    akka.loglevel = ERROR
-    akka.stdout-loglevel = ERROR
-    windows-connection-abort-workaround-enabled = auto
-    akka.log-dead-letters = OFF
-    akka.http.server.request-timeout = 1000s""")
-}
-
-class TimeoutDirectivesFiniteTimeoutExamplesSpec extends AkkaSpec(TimeoutDirectivesFiniteTimeoutTestConfig.testConf)
+class TimeoutDirectivesFiniteTimeoutExamplesSpec extends RoutingSpec
   with ScalaFutures with CompileOnlySpec {
-  import system.dispatcher
-  implicit val materializer = ActorMaterializer()
+  implicit val timeout: RouteTestTimeout = RouteTestTimeout(3.seconds)
+  override def testConfigSource: String =
+    "akka.http.server.request-timeout = 1000s\n" +
+      super.testConfigSource
 
-  def slowFuture(): Future[String] = Promise[String].future // TODO: move to Future.never in Scala 2.12
-
-  def runRoute(route: Route, routePath: String): HttpResponse = {
-    val (hostname, port) = SocketUtil.temporaryServerHostnameAndPort()
-    val binding = Http().bindAndHandle(route, hostname, port)
-
-    val response = Http().singleRequest(HttpRequest(uri = s"http://$hostname:$port/$routePath")).futureValue
-
-    binding.flatMap(_.unbind()).futureValue
-
-    response
-  }
+  def slowFuture(): Future[String] = Future.never
 
   // demonstrates that timeout is correctly modified for finite initial values of akka.http.server.request-timeout
   "Request Timeout" should {
@@ -187,7 +158,11 @@ class TimeoutDirectivesFiniteTimeoutExamplesSpec extends AkkaSpec(TimeoutDirecti
             complete(response)
           }
         }
-      runRoute(route, "timeout").status should ===(StatusCodes.ServiceUnavailable) // the timeout response
+
+      //check
+      Get("/timeout") ~!> route ~> check {
+        status should ===(StatusCodes.ServiceUnavailable) // the timeout response
+      }
     }
   }
 

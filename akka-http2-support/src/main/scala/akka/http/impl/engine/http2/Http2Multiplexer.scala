@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.engine.http2
@@ -12,8 +12,8 @@ import scala.collection.mutable
 import scala.collection.immutable
 import akka.stream.stage.{ GraphStageLogic, InHandler, OutHandler, StageLogging }
 import akka.util.ByteString
-
 import FrameEvent._
+import akka.http.scaladsl.settings.Http2CommonSettings
 
 /**
  * INTERNAL API
@@ -33,17 +33,37 @@ private[http2] trait Http2Multiplexer {
   def updatePriority(priorityFrame: PriorityFrame): Unit
 
   def reportTimings(): Unit
+
+  /** Called to cleanup any state when the connection is torn down */
+  def shutdown(): Unit
 }
 
 /**
  * INTERNAL API
  *
- * The current default multiplexer.
+ * Multiplexes the outgoing side of the streams on a HTTP/2 connection.
+ * Accepts the streams from the Akka HTTP side and turns them into `FrameEvent`s
+ * to be passed to the network side.
+ *
+ * Mixed into the Http2ServerDemux graph logic.
  */
 @InternalApi
-private[http2] trait Http2MultiplexerSupport { logic: GraphStageLogic with StageLogging ⇒
+private[http2] trait Http2MultiplexerSupport { logic: GraphStageLogic with StageLogging =>
+  def isServer: Boolean
+  def settings: Http2CommonSettings
+
+  /**
+   * Signal an outgoing stream has ended, so when the incoming side is also finished it can be cleaned up.
+   */
+  def handleOutgoingEnded(streamId: Int): Unit
+
+  /**
+   * Allows suspending reading of incoming frames.
+   */
+  def allowReadingIncomingFrames(allow: Boolean): Unit
+
   def createMultiplexer(outlet: GenericOutlet[FrameEvent], prioritizer: StreamPrioritizer): Http2Multiplexer =
-    new Http2Multiplexer with OutHandler with StateTimingSupport with LogSupport {
+    new Http2Multiplexer with OutHandler with StateTimingSupport with LogSupport { self =>
       outlet.setHandler(this)
 
       class OutStream(
@@ -83,7 +103,7 @@ private[http2] trait Http2MultiplexerSupport { logic: GraphStageLogic with Stage
           } else
             maybePull()
 
-          debug(s"[$streamId] sending ${toSend.size} bytes, endStream = $endStream")
+          debug(s"[$streamId] sending ${toSend.size} bytes, endStream = $endStream, remaining buffer [${buffer.size}], remaining stream-level WINDOW [$outboundWindowLeft]")
 
           DataFrame(streamId, endStream, toSend)
         }
@@ -111,6 +131,8 @@ private[http2] trait Http2MultiplexerSupport { logic: GraphStageLogic with Stage
           buffer = ByteString.empty
           trailer = None
           maybeInlet.foreach(_.cancel())
+          self.closeStream(this)
+          handleOutgoingEnded(streamId)
 
           if (maybeInlet.isDefined) {
             maybeInlet = None
@@ -123,13 +145,12 @@ private[http2] trait Http2MultiplexerSupport { logic: GraphStageLogic with Stage
 
         override def onPush(): Unit = {
           inlet.grab() match {
-            case newData: ByteString          ⇒ buffer ++= newData
-            case HttpEntity.Chunk(newData, _) ⇒ buffer ++= newData
-            case HttpEntity.LastChunk(_, headers) ⇒
-              trailer = Some(ParsedHeadersFrame(streamId, endStream = true, ResponseRendering.renderHeaders(headers, log), None))
+            case newData: ByteString          => buffer ++= newData
+            case HttpEntity.Chunk(newData, _) => buffer ++= newData
+            case HttpEntity.LastChunk(_, headers) =>
+              trailer = Some(ParsedHeadersFrame(streamId, endStream = true, ResponseRendering.renderHeaders(headers, log, isServer), None))
           }
 
-          debug(s"[$streamId] buffered ${buffer.size} bytes")
           maybePull()
 
           // else wait for more data being drained
@@ -174,7 +195,7 @@ private[http2] trait Http2MultiplexerSupport { logic: GraphStageLogic with Stage
             sub.data.runWith(subIn.sink)(subFusingMaterializer)
           }
         } else {
-          // stream was cancelled before it we got the response stream
+          // stream was cancelled before we got the response
           sub.data.runWith(Sink.cancelled)(subFusingMaterializer)
           outStreams.remove(sub.streamId)
         }
@@ -196,16 +217,16 @@ private[http2] trait Http2MultiplexerSupport { logic: GraphStageLogic with Stage
         val delta = newDefaultWindow - currentInitialWindow
 
         currentInitialWindow = newDefaultWindow
-        outStreams.values.foreach(i ⇒ updateWindowFor(i.streamId, delta))
+        outStreams.values.foreach(i => updateWindowFor(i.streamId, delta))
       }
       override def updatePriority(info: PriorityFrame): Unit = prioritizer.updatePriority(info)
 
       private def streamFor(streamId: Int): OutStream = outStreams.get(streamId) match {
-        case None ⇒
+        case None =>
           val newOne = new OutStream(streamId, None, currentInitialWindow)
-          outStreams += streamId → newOne
+          outStreams += streamId -> newOne
           newOne
-        case Some(old) ⇒ old
+        case Some(old) => old
       }
       private def windowLeftFor(streamId: Int): Int = streamFor(streamId).outboundWindowLeft
       private def updateWindowFor(streamId: Int, increment: Int): Unit = {
@@ -215,11 +236,9 @@ private[http2] trait Http2MultiplexerSupport { logic: GraphStageLogic with Stage
       }
 
       def enqueueOutStream(outStream: OutStream): Unit = state.enqueueOutStream(outStream)
+      def closeStream(outStream: OutStream): Unit = state.closeStream(outStream)
 
-      override def onDownstreamFinish(): Unit = {
-        outStreams.values.foreach(_.cancelStream())
-        completeStage()
-      }
+      override def shutdown(): Unit = outStreams.values.foreach(_.cancelStream())
 
       var state: MultiplexerState = Idle
       def onPull(): Unit = state.onPull()
@@ -229,13 +248,14 @@ private[http2] trait Http2MultiplexerSupport { logic: GraphStageLogic with Stage
         state = nextState
       }
 
-      sealed trait MultiplexerState extends Product {
+      private[http2] sealed trait MultiplexerState extends Product {
         def name: String = productPrefix
 
         def onPull(): Unit
         def pushControlFrame(frame: FrameEvent): Unit
         def connectionWindowAvailable(): Unit
         def enqueueOutStream(outStream: OutStream): Unit
+        def closeStream(outStream: OutStream): Unit
       }
 
       // Multiplexer state machine
@@ -245,11 +265,12 @@ private[http2] trait Http2MultiplexerSupport { logic: GraphStageLogic with Stage
       // WaitingForNetworkToSendData: Data frames queued but no network demand
       // WaitingForConnectionWindow: Data frames queued, demand from the network, but no connection-level window available
 
-      case object Idle extends MultiplexerState {
+      private[http2] case object Idle extends MultiplexerState {
         def onPull(): Unit = become(WaitingForData)
-        def pushControlFrame(frame: FrameEvent): Unit = become(WaitingForNetworkToSendControlFrames(frame :: Nil, immutable.TreeSet.empty))
+        def pushControlFrame(frame: FrameEvent): Unit = become(WaitingForNetworkToSendControlFrames(Vector(frame), immutable.TreeSet.empty))
         def connectionWindowAvailable(): Unit = ()
         def enqueueOutStream(outStream: OutStream): Unit = become(WaitingForNetworkToSendData(immutable.TreeSet(outStream.streamId)))
+        def closeStream(outStream: OutStream): Unit = ()
       }
 
       case object WaitingForData extends MultiplexerState {
@@ -271,14 +292,17 @@ private[http2] trait Http2MultiplexerSupport { logic: GraphStageLogic with Stage
 
             become(nextStateAfterPushingDataFrame(outStream, Set.empty))
           }
+        def closeStream(outStream: OutStream): Unit = ()
       }
 
       /** Not yet pulled but data waiting to be sent */
-      case class WaitingForNetworkToSendControlFrames(controlFrameBuffer: immutable.Seq[FrameEvent], sendableOutstreams: immutable.Set[Int]) extends MultiplexerState {
+      private[http2] case class WaitingForNetworkToSendControlFrames(controlFrameBuffer: immutable.Vector[FrameEvent], sendableOutstreams: immutable.Set[Int]) extends MultiplexerState {
         require(controlFrameBuffer.nonEmpty)
+        allowReadingIncomingFrames(controlFrameBuffer.size < settings.outgoingControlFrameBufferSize)
         def onPull(): Unit = controlFrameBuffer match {
-          case first +: remaining ⇒
+          case first +: remaining =>
             outlet.push(first)
+            allowReadingIncomingFrames(remaining.size < settings.outgoingControlFrameBufferSize)
             become {
               if (remaining.isEmpty && sendableOutstreams.isEmpty) Idle
               else if (remaining.isEmpty) WaitingForNetworkToSendData(sendableOutstreams)
@@ -290,15 +314,22 @@ private[http2] trait Http2MultiplexerSupport { logic: GraphStageLogic with Stage
         def enqueueOutStream(outStream: OutStream): Unit =
           if (!sendableOutstreams.contains(outStream.streamId))
             become(copy(sendableOutstreams = sendableOutstreams + outStream.streamId))
+
+        def closeStream(outStream: OutStream): Unit = {
+          if (sendableOutstreams.contains(outStream.streamId)) {
+            val sendableExceptClosed = sendableOutstreams - outStream.streamId
+            become(copy(sendableOutstreams = sendableExceptClosed))
+          }
+        }
       }
 
-      abstract class WithSendableOutStreams extends MultiplexerState {
+      private[http2] abstract class WithSendableOutStreams extends MultiplexerState {
         def sendableOutstreams: immutable.Set[Int]
+        def withSendableOutstreams(sendableOutStreams: immutable.Set[Int]): WithSendableOutStreams
 
         protected def sendNext(): Unit = {
           val chosenId = prioritizer.chooseSubstream(sendableOutstreams)
           val outStream = streamFor(chosenId)
-          require(outStream.canSend)
 
           val maxBytesToSend = currentMaxFrameSize min connectionWindowLeft
           val frame = outStream.nextFrame(maxBytesToSend)
@@ -307,24 +338,36 @@ private[http2] trait Http2MultiplexerSupport { logic: GraphStageLogic with Stage
 
           become(nextStateAfterPushingDataFrame(outStream, sendableOutstreams))
         }
+
+        def closeStream(outStream: OutStream): Unit =
+          if (sendableOutstreams.contains(outStream.streamId)) {
+            val sendableExceptClosed = sendableOutstreams - outStream.streamId
+
+            if (sendableExceptClosed.isEmpty) become(Idle)
+            else become(withSendableOutstreams(sendableExceptClosed))
+          }
+
       }
 
-      case class WaitingForNetworkToSendData(sendableOutstreams: immutable.Set[Int]) extends WithSendableOutStreams {
+      private[http2] case class WaitingForNetworkToSendData(sendableOutstreams: immutable.Set[Int]) extends WithSendableOutStreams {
         require(sendableOutstreams.nonEmpty)
         def onPull(): Unit =
           if (connectionWindowLeft > 0) sendNext()
           else // do nothing and wait for window first
             become(WaitingForConnectionWindow(sendableOutstreams))
 
-        def pushControlFrame(frame: FrameEvent): Unit = become(WaitingForNetworkToSendControlFrames(frame :: Nil, sendableOutstreams))
+        def pushControlFrame(frame: FrameEvent): Unit = become(WaitingForNetworkToSendControlFrames(Vector(frame), sendableOutstreams))
         def connectionWindowAvailable(): Unit = ()
         def enqueueOutStream(outStream: OutStream): Unit =
           if (!sendableOutstreams.contains(outStream.streamId))
             become(copy(sendableOutstreams = sendableOutstreams + outStream.streamId))
+
+        def withSendableOutstreams(sendableOutStreams: Set[Int]) =
+          WaitingForNetworkToSendData(sendableOutStreams)
       }
 
       /** Pulled and data is pending but no connection-level window available */
-      case class WaitingForConnectionWindow(sendableOutstreams: immutable.Set[Int]) extends WithSendableOutStreams {
+      private[http2] case class WaitingForConnectionWindow(sendableOutstreams: immutable.Set[Int]) extends WithSendableOutStreams {
         require(sendableOutstreams.nonEmpty)
         def onPull(): Unit = throw new IllegalStateException(s"pull unexpected while waiting for connection window")
         def pushControlFrame(frame: FrameEvent): Unit = {
@@ -335,15 +378,18 @@ private[http2] trait Http2MultiplexerSupport { logic: GraphStageLogic with Stage
         def enqueueOutStream(outStream: OutStream): Unit =
           if (!sendableOutstreams.contains(outStream.streamId))
             become(copy(sendableOutstreams = sendableOutstreams + outStream.streamId))
+
+        def withSendableOutstreams(sendableOutStreams: Set[Int]) =
+          WaitingForConnectionWindow(sendableOutStreams)
       }
 
       private def maxBytesToBufferPerSubstream = 2 * currentMaxFrameSize // for now, let's buffer two frames per substream
 
-      def debug(msg: ⇒ String): Unit = log.debug(msg)
+      def debug(msg: => String): Unit = log.debug(msg)
 
       def nextStateAfterPushingDataFrame(outStream: OutStream, sendableOutstreams: Set[Int]): MultiplexerState = {
         outStream.endStreamIfPossible()
-          .map(finalFrame ⇒ WaitingForNetworkToSendControlFrames(immutable.Seq(finalFrame), sendableOutstreams - outStream.streamId))
+          .map(finalFrame => WaitingForNetworkToSendControlFrames(Vector(finalFrame), sendableOutstreams - outStream.streamId))
           .getOrElse {
             val newSendableOutStreams =
               if (outStream.canSend) sendableOutstreams + outStream.streamId
@@ -356,10 +402,10 @@ private[http2] trait Http2MultiplexerSupport { logic: GraphStageLogic with Stage
     }
 
   private trait LogSupport {
-    def debug(msg: ⇒ String): Unit
+    def debug(msg: => String): Unit
   }
 
-  private trait StateTimingSupport { self: LogSupport ⇒
+  private trait StateTimingSupport { self: LogSupport =>
     var timings = Map.empty[String, Long].withDefaultValue(0L)
     var lastTimestamp = System.nanoTime()
 
@@ -375,7 +421,7 @@ private[http2] trait Http2MultiplexerSupport { logic: GraphStageLogic with Stage
     /** Logs DEBUG level timing data for the output side of the multiplexer*/
     def reportTimings(): Unit = {
       val timingsReport = timings.toSeq.sortBy(_._1).map {
-        case (name, nanos) ⇒ f"${nanos / 1000000}%5d ms $name"
+        case (name, nanos) => f"${nanos / 1000000}%5d ms $name"
       }.mkString("\n")
       debug(s"Timing data for connection\n$timingsReport")
     }

@@ -1,14 +1,14 @@
 # Pluggable Client Transports / HTTP(S) proxy Support
 
-The client side infrastructure has (unstable) support to plug different transport mechanisms underneath. A client side
+The client side infrastructure has support to plug different transport mechanisms underneath (the API may still change in the future). A client side
 transport is represented by an instance of
 @scala[@scaladoc[akka.http.scaladsl.ClientTransport](akka.http.scaladsl.ClientTransport)]@java[@javadoc[akka.http.javadsl.ClientTransport](akka.http.javadsl.ClientTransport)]:
 
 Scala
-:  @@snip [ClientTransport.scala]($akka-http$/akka-http-core/src/main/scala/akka/http/scaladsl/ClientTransport.scala) { #client-transport-definition }
+:  @@snip [ClientTransport.scala](/akka-http-core/src/main/scala/akka/http/scaladsl/ClientTransport.scala) { #client-transport-definition }
 
 Java
-:  @@snip [ClientTransport.scala]($akka-http$/akka-http-core/src/main/scala/akka/http/javadsl/ClientTransport.scala) { #client-transport-definition }
+:  @@snip [ClientTransport.scala](/akka-http-core/src/main/scala/akka/http/javadsl/ClientTransport.scala) { #client-transport-definition }
 
 A transport implementation defines how the client infrastructure should communicate with a given host.
 
@@ -21,10 +21,10 @@ transport layer itself.
 
 ## Configuring Client Transports
 
-A @unidoc[ClientTransport] can be configured in the @unidoc[ClientConnectionSettings]. Right now, this is not possible
+A @apidoc[ClientTransport] can be configured in the @apidoc[ClientConnectionSettings]. Right now, this is not possible
 through config files but only by code. First, use `ClientConnectionSettings.withTransport` to configure a transport,
-then use `ConnectionPoolSettings.withConnectionSettings`. @unidoc[ClientConnectionSettings] can be passed to all
-client-side entry points in @unidoc[Http].
+then use `ConnectionPoolSettings.withConnectionSettings`. @apidoc[ClientConnectionSettings] can be passed to all
+client-side entry points in @apidoc[Http$].
 
 ## Predefined Transports
 
@@ -58,6 +58,7 @@ akka.http.client.proxy {
 
 If host is left as `""` and you attempt to setup a httpsProxy transport, an exception will be thrown.
 
+<a id="use-https-proxy-with-http-singlerequest"></a>
 ### Use HTTP(S) proxy with @scala[`Http().singleRequest`]@java[`Http.get(...).singleRequest`]
 
 To make use of an HTTP proxy when using the `singleRequest` API you simply need to configure the proxy and pass
@@ -71,7 +72,7 @@ Java
 
 ### Use HTTP(S) proxy that requires authentication
 
-In order to use a HTTP(S) proxy that requires authentication, you need to provide @unidoc[HttpCredentials] that will be used
+In order to use a HTTP(S) proxy that requires authentication, you need to provide @apidoc[HttpCredentials] that will be used
 when making the CONNECT request to the proxy:
 
 
@@ -103,6 +104,18 @@ Java
 :  @@snip [WebSocketClientExampleTest.java]($test$/java/docs/http/javadsl/WebSocketClientExampleTest.java) { #auth-https-proxy-singleWebSocket-request-example }
 
 
+## Custom Host Name Resolution Transport
+
+You can use @apidoc[ClientTransport.withCustomResolver](ClientTransport) to customize host name resolution. The given resolution function will be called for every connection attempt to resolve
+a hostname / port combination (potentially asynchronously) to an `InetSocketAddress`.
+
+As a backend to implement the resolution function you can use Akka's [Async DNS Resolution](https://doc.akka.io/docs/akka/current/io-dns.html#dns-extension).
+
+Potential use cases:
+
+ * in a managed setting this can be used to query for `SRV` DNS records that contain both address and port for a service.
+ * if the DNS server returns multiple addresses, you can implement a load balancing algorithm to select a different target address for each connection      
+
 ## Implementing Custom Transports
 
 Implement `ClientTransport.connectTo` to implement a custom client transport.
@@ -111,4 +124,3 @@ Here are some ideas for custom (or future predefined) transports:
 
  * SSH tunnel transport: connects to the target host through an SSH tunnel
  * Per-host configurable transport: allows choosing transports per target host
-

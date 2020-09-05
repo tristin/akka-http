@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package io.akka.integrationtest.http
@@ -8,14 +8,17 @@ import com.typesafe.config.{ Config, ConfigFactory }
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import org.scalatest.{ BeforeAndAfterAll, Matchers, WordSpec }
+import org.scalatest.BeforeAndAfterAll
 import akka.util.ByteString
 import akka.actor.ActorSystem
+import akka.http.ccompat._
 import akka.http.scaladsl.model._
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl._
 import akka.testkit._
 import headers._
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
 
 /**
  * Integration test for external HTTP libraries that are built on top of
@@ -34,7 +37,7 @@ import headers._
  * check for any visibility issues when Akka HTTP core is used by third
  * party libraries.
  */
-class HttpModelIntegrationSpec extends WordSpec with Matchers with BeforeAndAfterAll {
+class HttpModelIntegrationSpec extends AnyWordSpec with Matchers with BeforeAndAfterAll {
 
   val testConf: Config = ConfigFactory.parseString("""
     akka.event-handlers = ["akka.testkit.TestEventListener"]
@@ -72,24 +75,24 @@ class HttpModelIntegrationSpec extends WordSpec with Matchers with BeforeAndAfte
       // HttpHeaders by getting their name and value. We convert Content-Type
       // and Content-Length by using the toString of their values.
 
-      val partialTextHeaders: Seq[(String, String)] = request.headers.map(h ⇒ (h.name, h.value))
+      val partialTextHeaders: Seq[(String, String)] = request.headers.map(h => (h.name, h.value))
       val entityTextHeaders: Seq[(String, String)] = request.entity match {
-        case HttpEntity.Default(contentType, contentLength, _) ⇒
+        case HttpEntity.Default(contentType, contentLength, _) =>
           Seq(("Content-Type", contentType.toString), ("Content-Length", contentLength.toString))
-        case _ ⇒
+        case _ =>
           ???
       }
       val textHeaders: Seq[(String, String)] = entityTextHeaders ++ partialTextHeaders
       textHeaders shouldEqual Seq(
-        "Content-Type" → "application/json",
-        "Content-Length" → "5",
-        "Host" → "localhost",
-        "Origin" → "null")
+        "Content-Type" -> "application/json",
+        "Content-Length" -> "5",
+        "Host" -> "localhost",
+        "Origin" -> "null")
 
       // Finally convert the body into an Array[Byte].
 
       val entityBytes: Array[Byte] = Await.result(request.entity.toStrict(1.second.dilated), 2.seconds.dilated).data.toArray
-      entityBytes.to[Seq] shouldEqual ByteString("hello").to[Seq]
+      entityBytes.to(Seq) shouldEqual ByteString("hello").to(Seq)
     }
 
     "be able to build an HttpResponse from String headers and Array[Byte] body" in {
@@ -100,17 +103,17 @@ class HttpModelIntegrationSpec extends WordSpec with Matchers with BeforeAndAfte
       // example simple model of an HTTP response.
 
       val textHeaders: Seq[(String, String)] = Seq(
-        "Content-Type" → "text/plain;charset=UTF-8",
-        "Content-Length" → "3",
-        "X-Greeting" → "Hello")
+        "Content-Type" -> "text/plain;charset=UTF-8",
+        "Content-Length" -> "3",
+        "X-Greeting" -> "Hello")
       val byteArrayBody: Array[Byte] = "foo".getBytes
 
       // Now we need to convert this model to Akka HTTP's model. To do that
       // we use Akka HTTP's HeaderParser to parse the headers, giving us a
       // List[HttpHeader].
 
-      val parsingResults = textHeaders map { case (name, value) ⇒ HttpHeader.parse(name, value) }
-      val convertedHeaders = parsingResults collect { case HttpHeader.ParsingResult.Ok(h, _) ⇒ h }
+      val parsingResults = textHeaders map { case (name, value) => HttpHeader.parse(name, value) }
+      val convertedHeaders = parsingResults collect { case HttpHeader.ParsingResult.Ok(h, _) => h }
       val parseErrors = parsingResults.flatMap(_.errors)
       parseErrors shouldBe empty
 
@@ -121,20 +124,20 @@ class HttpModelIntegrationSpec extends WordSpec with Matchers with BeforeAndAfte
       // Seq[Header] and dealt with separately.
 
       val normalHeaders = convertedHeaders.filter {
-        case _: `Content-Type`   ⇒ false
-        case _: `Content-Length` ⇒ false
-        case _                   ⇒ true
+        case _: `Content-Type`   => false
+        case _: `Content-Length` => false
+        case _                   => true
       }
       normalHeaders.head shouldEqual RawHeader("X-Greeting", "Hello")
       normalHeaders.tail shouldEqual Nil
 
       val contentType = convertedHeaders.collectFirst {
-        case ct: `Content-Type` ⇒ ct.contentType
+        case ct: `Content-Type` => ct.contentType
       }
       contentType shouldEqual Some(ContentTypes.`text/plain(UTF-8)`)
 
       val contentLength = convertedHeaders.collectFirst {
-        case cl: `Content-Length` ⇒ cl.length
+        case cl: `Content-Length` => cl.length
       }
       contentLength shouldEqual Some(3)
 
@@ -180,13 +183,13 @@ class HttpModelIntegrationSpec extends WordSpec with Matchers with BeforeAndAfte
         // Headers can be created from strings.
         def header(name: String, value: String): TypedHeader = {
           val parsedHeader = HttpHeader.parse(name, value) match {
-            case HttpHeader.ParsingResult.Ok(h, Nil) ⇒ h
-            case x                                   ⇒ sys.error(s"Failed to parse: ${x.errors}")
+            case HttpHeader.ParsingResult.Ok(h, Nil) => h
+            case x                                   => sys.error(s"Failed to parse: ${x.errors}")
           }
           parsedHeader match {
-            case `Content-Type`(contentType) ⇒ ContentTypeHeader(contentType)
-            case `Content-Length`(length)    ⇒ ContentLengthHeader(length)
-            case _                           ⇒ GenericHeader(parsedHeader)
+            case `Content-Type`(contentType) => ContentTypeHeader(contentType)
+            case `Content-Length`(length)    => ContentLengthHeader(length)
+            case _                           => GenericHeader(parsedHeader)
           }
         }
 

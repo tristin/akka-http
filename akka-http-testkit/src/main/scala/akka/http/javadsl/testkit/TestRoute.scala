@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.javadsl.testkit
@@ -40,4 +40,16 @@ trait TestRoute {
    * use the [[TestRoute#run]] method, instead.
    */
   def runWithRejections(request: HttpRequest): TestRouteResult
+
+  /**
+   * Similar to [[TestRoute#run]] but runs the request through a full HTTP client and server stack.
+   *
+   * Run the request against the sealed route, meaning that exceptions and rejections will be handled by
+   * the default exception and rejection handlers. The default handlers will convert exceptions and
+   * rejections into HTTP responses with corresponding status codes (like 404 when no route matches
+   * the path or 500 in cases of exceptions).
+   *
+   * If you want to assert on the original rejections instead, use [[TestRoute#runWithRejections]].
+   */
+  def runClientServer(request: HttpRequest): TestRouteResult
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl
@@ -20,13 +20,28 @@ class CustomMediaTypesSpec extends AkkaSpec with ScalaFutures
   implicit val mat = ActorMaterializer()
 
   "Http" should {
+    "find media types in a set if they differ in casing" in {
+      val set: java.util.Set[MediaType] = new java.util.HashSet
+      set.add(MediaTypes.`application/vnd.ms-excel`)
+      set.add(MediaTypes.`application/vnd.ms-powerpoint`)
+      set.add(MediaTypes.`application/msword`)
+      set.add(MediaType.customBinary("application", "x-Akka-TEST", MediaType.NotCompressible))
+
+      set.contains(MediaType.parse("application/msword").right.get) should ===(true)
+      set.contains(MediaType.parse("application/MsWord").right.get) should ===(true)
+      set.contains(MediaType.parse("application/vnd.ms-POWERPOINT").right.get) should ===(true)
+      set.contains(MediaType.parse("application/VnD.MS-eXceL").right.get) should ===(true)
+      set.contains(MediaType.parse("application/x-akka-test").right.get) should ===(true)
+      set.contains(MediaType.parse("application/x-Akka-TEST").right.get) should ===(true)
+    }
+
     "allow registering custom media type" in {
       import system.dispatcher
-      val (host, port) = SocketUtil.temporaryServerHostnameAndPort()
+      val (host, port) = SocketUtil2.temporaryServerHostnameAndPort()
 
       //#application-custom
 
-      // similarily in Java: `akka.http.javadsl.settings.[...]`
+      // similarly in Java: `akka.http.javadsl.settings.[...]`
       import akka.http.scaladsl.settings.ParserSettings
       import akka.http.scaladsl.settings.ServerSettings
 
@@ -36,13 +51,13 @@ class CustomMediaTypesSpec extends AkkaSpec with ScalaFutures
         MediaType.customWithFixedCharset("application", "custom", utf8)
 
       // add custom media type to parser settings:
-      val parserSettings = ParserSettings(system).withCustomMediaTypes(`application/custom`)
+      val parserSettings = ParserSettings.forServer(system).withCustomMediaTypes(`application/custom`)
       val serverSettings = ServerSettings(system).withParserSettings(parserSettings)
 
-      val routes = extractRequest { r ⇒
+      val routes = extractRequest { r =>
         complete(r.entity.contentType.toString + " = " + r.entity.contentType.getClass)
       }
-      val binding = Http().bindAndHandle(routes, host, port, settings = serverSettings)
+      Http().newServerAt(host, port).withSettings(serverSettings).bind(routes)
       //#application-custom
 
       val request = Get(s"http://$host:$port/").withEntity(HttpEntity(`application/custom`, "~~example~=~value~~"))

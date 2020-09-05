@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.javadsl
@@ -8,11 +8,12 @@ import java.lang.reflect.{ Modifier, Method }
 
 import akka.http.javadsl.server.directives.CorrespondsTo
 import org.scalatest.exceptions.TestPendingException
-import org.scalatest.{ Matchers, WordSpec }
 
 import scala.util.control.NoStackTrace
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
 
-class DirectivesConsistencySpec extends WordSpec with Matchers {
+class DirectivesConsistencySpec extends AnyWordSpec with Matchers {
 
   val scalaDirectivesClazz = classOf[akka.http.scaladsl.server.Directives]
   val javaDirectivesClazz = classOf[akka.http.javadsl.server.AllDirectives]
@@ -22,14 +23,14 @@ class DirectivesConsistencySpec extends WordSpec with Matchers {
       Set("productArity", "canEqual", "productPrefix", "copy", "productIterator", "productElement",
         "concat", "route") ++ // TODO this fails on jenkins but not locally, no idea why, disabling to get Java DSL in
         // param extractions in ScalaDSL
-        Set("DoubleNumber", "HexIntNumber", "HexLongNumber", "IntNumber", "JavaUUID", "LongNumber",
+        Set("not", "DoubleNumber", "HexIntNumber", "HexLongNumber", "IntNumber", "JavaUUID", "LongNumber",
           "Neutral", "PathEnd", "Remaining", "Segment", "Segments", "Slash", "RemainingPath") // TODO do we cover these?
 
   def prepareDirectivesList(in: Array[Method]): List[Method] = {
     in.toSet[Method]
       .toList
       .foldLeft[List[Method]](Nil) {
-        (l, s) ⇒
+        (l, s) =>
           {
             val test = l find { _.getName.toLowerCase == s.getName.toLowerCase }
             if (test.isEmpty) s :: l else l
@@ -37,10 +38,10 @@ class DirectivesConsistencySpec extends WordSpec with Matchers {
       }
       .sortBy(_.getName)
       .iterator
-      .filterNot(m ⇒ Modifier.isStatic(m.getModifiers))
-      .filterNot(m ⇒ ignore(m.getName))
-      .filterNot(m ⇒ m.getName.contains("$"))
-      .filterNot(m ⇒ m.getName.startsWith("_"))
+      .filterNot(m => Modifier.isStatic(m.getModifiers))
+      .filterNot(m => ignore(m.getName))
+      .filterNot(m => m.getName.contains("$"))
+      .filterNot(m => m.getName.startsWith("_"))
       .toList
   }
 
@@ -55,10 +56,10 @@ class DirectivesConsistencySpec extends WordSpec with Matchers {
     val javaToScalaMappings =
       for {
         // using Scala annotations - Java annotations were magically not present in certain places...
-        d ← javaDirectives
+        d <- javaDirectives
         if d.isAnnotationPresent(classOf[CorrespondsTo])
         annot = d.getAnnotation(classOf[CorrespondsTo])
-      } yield d.getName → annot.value()
+      } yield d.getName -> annot.value()
 
     Map(javaToScalaMappings.toList: _*)
   }
@@ -68,24 +69,24 @@ class DirectivesConsistencySpec extends WordSpec with Matchers {
   /** Left(@CorrespondsTo(...) or Right(normal name) */
   def correspondingScalaMethodName(m: Method): Either[String, String] =
     correspondingScalaMethods.get(m.getName) match {
-      case Some(correspondent) ⇒ Left(correspondent)
-      case _                   ⇒ Right(m.getName)
+      case Some(correspondent) => Left(correspondent)
+      case _                   => Right(m.getName)
     }
 
   /** Left(@CorrespondsTo(...) or Right(normal name) */
   def correspondingJavaMethodName(m: Method): Either[String, String] =
     correspondingJavaMethods.get(m.getName) match {
-      case Some(correspondent) ⇒ Left(correspondent)
-      case _                   ⇒ Right(m.getName)
+      case Some(correspondent) => Left(correspondent)
+      case _                   => Right(m.getName)
     }
 
   val allowMissing: Map[Class[_], Set[String]] = Map(
-    scalaDirectivesClazz → Set(
+    scalaDirectivesClazz -> Set(
       "route", "request",
       "completeOK", // solved by raw complete() in Scala
       "defaultDirectoryRenderer", "defaultContentTypeResolver" // solved by implicits in Scala
     ),
-    javaDirectivesClazz → Set(
+    javaDirectivesClazz -> Set(
       "as",
       "instanceOf",
       "pass",
@@ -109,25 +110,25 @@ class DirectivesConsistencySpec extends WordSpec with Matchers {
 
   def assertHasMethod(c: Class[_], name: String, alternativeName: String): Unit = {
     // include class name to get better error message
-    if (!allowMissing.getOrElse(c, Set.empty).exists(n ⇒ n == name || n == alternativeName)) {
-      val methods = c.getMethods.collect { case m if !ignore(m.getName) ⇒ c.getName + "." + m.getName }
+    if (!allowMissing.getOrElse(c, Set.empty).exists(n => n == name || n == alternativeName)) {
+      val methods = c.getMethods.collect { case m if !ignore(m.getName) => c.getName + "." + m.getName }
 
       def originClazz = {
         // look in the "opposite" class
         // traversal is different in scala/java - in scala its traits, so we need to look at interfaces
         // in hava we have a huge inheritance chain so we unfold it
         c match {
-          case `javaDirectivesClazz` ⇒
+          case `javaDirectivesClazz` =>
             val all = scalaDirectivesClazz
             (for {
-              i ← all.getInterfaces
-              m ← i.getDeclaredMethods
+              i <- all.getInterfaces
+              m <- i.getDeclaredMethods
               if m.getName == name || m.getName == alternativeName
             } yield i).headOption
               .map(_.getName)
               .getOrElse(throw new Exception(s"Unable to locate method [$name] on source class $all"))
 
-          case `scalaDirectivesClazz` ⇒
+          case `scalaDirectivesClazz` =>
             val all = javaDirectivesClazz
 
             var is = List.empty[Class[_]]
@@ -138,8 +139,8 @@ class DirectivesConsistencySpec extends WordSpec with Matchers {
             }
 
             (for {
-              i ← is
-              m ← i.getDeclaredMethods
+              i <- is
+              m <- i.getDeclaredMethods
               if m.getName == name || m.getName == alternativeName
             } yield i).headOption
               .map(_.getName)
@@ -163,14 +164,14 @@ class DirectivesConsistencySpec extends WordSpec with Matchers {
 
   "Directive aliases" should {
     info("Aliases: ")
-    correspondingScalaMethods.foreach { case (k, v) ⇒ info(s"  $k => $v") }
+    correspondingScalaMethods.foreach { case (k, v) => info(s"  $k => $v") }
   }
 
   "Consistency scaladsl -> javadsl" should {
     for {
-      m ← scalaDirectives
+      m <- scalaDirectives
       name = m.getName
-      targetName = correspondingJavaMethodName(m) match { case Left(l) ⇒ l case Right(r) ⇒ r }
+      targetName = correspondingJavaMethodName(m) match { case Left(l) => l case Right(r) => r }
       text = if (name == targetName) name else s"$name (alias: $targetName)"
     } s"""define Scala directive [$text] for JavaDSL too""" in {
       assertHasMethod(javaDirectivesClazz, name, targetName)
@@ -179,9 +180,9 @@ class DirectivesConsistencySpec extends WordSpec with Matchers {
 
   "Consistency javadsl -> scaladsl" should {
     for {
-      m ← javaDirectives
+      m <- javaDirectives
       name = m.getName
-      targetName = correspondingScalaMethodName(m) match { case Left(l) ⇒ l case Right(r) ⇒ r }
+      targetName = correspondingScalaMethodName(m) match { case Left(l) => l case Right(r) => r }
       text = if (name == targetName) name else s"$name (alias for: $targetName)"
     } s"""define Java directive [$text] for ScalaDSL too""" in {
       assertHasMethod(scalaDirectivesClazz, name, targetName)

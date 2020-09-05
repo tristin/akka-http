@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2018-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.impl.engine.http2
@@ -7,46 +7,46 @@ package akka.http.impl.engine.http2
 import java.io.{ ByteArrayInputStream, ByteArrayOutputStream }
 import java.net.InetSocketAddress
 import java.nio.ByteOrder
-import javax.net.ssl.SSLContext
 
+import javax.net.ssl.SSLContext
 import akka.NotUsed
 import akka.http.impl.engine.http2.Http2Protocol.{ ErrorCode, Flags, FrameType, SettingIdentifier }
 import akka.http.impl.engine.http2.framing.FrameRenderer
 import akka.http.impl.engine.server.HttpAttributes
 import akka.http.impl.engine.ws.ByteStringSinkProbe
-import akka.http.impl.util.{ StreamUtils, StringRendering, WithLogCapturing }
+import akka.http.impl.util.{ AkkaSpecWithMaterializer, LogByteStringTools, StringRendering }
 import akka.http.scaladsl.model._
 import akka.http.scaladsl.model.headers.{ CacheDirectives, RawHeader }
-import akka.http.scaladsl.model.http2.Http2StreamIdHeader
 import akka.http.scaladsl.settings.ServerSettings
 import akka.stream.impl.io.ByteStringParser.ByteReader
 import akka.stream.scaladsl.{ BidiFlow, Flow, Sink, Source, SourceQueueWithComplete }
 import akka.stream.testkit.TestPublisher.ManualProbe
 import akka.stream.testkit.{ TestPublisher, TestSubscriber }
-import akka.stream.{ ActorMaterializer, Materializer, OverflowStrategies }
+import akka.stream.OverflowStrategy
 import akka.testkit._
 import akka.util.{ ByteString, ByteStringBuilder }
 import com.twitter.hpack.{ Decoder, Encoder, HeaderListener }
 import org.scalatest.concurrent.Eventually
 import org.scalatest.concurrent.PatienceConfiguration.Timeout
 
-import scala.annotation.tailrec
 import scala.collection.immutable
 import scala.collection.immutable.VectorBuilder
 import scala.concurrent.{ Await, Future, Promise }
 import scala.concurrent.duration._
-import scala.util.control.NoStackTrace
-
 import FrameEvent._
+import akka.event.Logging
+import akka.http.scaladsl.Http2
+import akka.stream.Attributes
+import akka.stream.Attributes.LogLevels
+import akka.stream.testkit.scaladsl.StreamTestKit
+import com.github.ghik.silencer.silent
 
-class Http2ServerSpec extends AkkaSpec("""
-    akka.loglevel = debug
-    akka.loggers = ["akka.http.impl.util.SilenceAllTestEventListener"]
-    
+class Http2ServerSpec extends AkkaSpecWithMaterializer("""
     akka.http.server.remote-address-header = on
+    akka.http.server.http2.log-frames = on
   """)
-  with WithInPendingUntilFixed with Eventually with WithLogCapturing {
-  implicit val mat = ActorMaterializer()
+  with WithInPendingUntilFixed with Eventually {
+  override def failOnSevereMessages: Boolean = true
 
   "The Http/2 server implementation" should {
     "support simple round-trips" should {
@@ -61,7 +61,7 @@ class Http2ServerSpec extends AkkaSpec("""
           sendHEADERS(streamId, endStream = true, endHeaders = true, requestHeaderBlock)
           expectRequest() shouldBe expectedRequest
 
-          responseOut.sendNext(response.addHeader(Http2StreamIdHeader(streamId)))
+          responseOut.sendNext(response.addAttribute(Http2.streamId, streamId))
           val headerPayload = expectHeaderBlock(streamId)
           headerPayload shouldBe expectedResponseHeaderBlock
         }
@@ -78,14 +78,14 @@ class Http2ServerSpec extends AkkaSpec("""
       }
       "GOAWAY when invalid headers frame" in new TestSetup with RequestResponseProbes {
         override def handlerFlow: Flow[HttpRequest, HttpResponse, NotUsed] =
-          Flow[HttpRequest].map { req ⇒
-            HttpResponse(entity = req.entity).addHeader(req.header[Http2StreamIdHeader].get)
+          Flow[HttpRequest].map { req =>
+            HttpResponse(entity = req.entity).addAttribute(Http2.streamId, req.attribute(Http2.streamId).get)
           }
 
         val headerBlock = hex"00 00 01 01 05 00 00 00 01 40"
         sendHEADERS(1, endStream = false, endHeaders = true, headerBlockFragment = headerBlock)
 
-        val (lastStreamId, errorCode) = expectGOAWAY(0) // since we have not processed any stream
+        val (_, errorCode) = expectGOAWAY(0) // since we have not processed any stream
         errorCode should ===(ErrorCode.COMPRESSION_ERROR)
       }
       "GOAWAY when second request on different stream has invalid headers frame" in new SimpleRequestResponseRoundtripSetup {
@@ -101,7 +101,7 @@ class Http2ServerSpec extends AkkaSpec("""
         val incorrectHeaderBlock = hex"00 00 01 01 05 00 00 00 01 40"
         sendHEADERS(3, endStream = false, endHeaders = true, headerBlockFragment = incorrectHeaderBlock)
 
-        val (lastStreamId, errorCode) = expectGOAWAY(1) // since we have sucessfully started processing stream `1`
+        val (_, errorCode) = expectGOAWAY(1) // since we have successfully started processing stream `1`
         errorCode should ===(ErrorCode.COMPRESSION_ERROR)
       }
       "Three consecutive GET requests" in new SimpleRequestResponseRoundtripSetup {
@@ -145,7 +145,7 @@ class Http2ServerSpec extends AkkaSpec("""
 
         sendHEADERS(1, endStream = true, endHeaders = false, fragment1)
         requestIn.ensureSubscription()
-        requestIn.expectNoMessage(remainingOrDefault)
+        requestIn.expectNoMessage(100.millis)
         sendCONTINUATION(1, endHeaders = true, fragment2)
 
         val request = expectRequestRaw()
@@ -153,8 +153,30 @@ class Http2ServerSpec extends AkkaSpec("""
         request.method shouldBe HttpMethods.GET
         request.uri shouldBe Uri("http://www.example.com/")
 
-        val streamIdHeader = request.header[Http2StreamIdHeader].getOrElse(Http2Compliance.missingHttpIdHeaderException)
-        responseOut.sendNext(HPackSpecExamples.FirstResponse.addHeader(streamIdHeader))
+        val streamId = request.attribute(Http2.streamId).getOrElse(Http2Compliance.missingHttpIdHeaderException)
+        responseOut.sendNext(HPackSpecExamples.FirstResponse.addAttribute(Http2.streamId, streamId))
+        val headerPayload = expectHeaderBlock(1)
+        headerPayload shouldBe HPackSpecExamples.C61FirstResponseWithHuffman
+      }
+      "GET request in one HEADERS and two CONTINUATION frames" in new TestSetup with RequestResponseProbes {
+        val headerBlock = HPackSpecExamples.C41FirstRequestWithHuffman
+        val fragment1 = headerBlock.take(8) // must be grouped by octets
+        val fragment2 = headerBlock.drop(8).take(8)
+        val fragment3 = headerBlock.drop(16)
+
+        sendHEADERS(1, endStream = true, endHeaders = false, fragment1)
+        requestIn.ensureSubscription()
+        requestIn.expectNoMessage(100.millis)
+        sendCONTINUATION(1, endHeaders = false, fragment2)
+        sendCONTINUATION(1, endHeaders = true, fragment3)
+
+        val request = expectRequestRaw()
+
+        request.method shouldBe HttpMethods.GET
+        request.uri shouldBe Uri("http://www.example.com/")
+
+        val streamId = request.attribute(Http2.streamId).getOrElse(Http2Compliance.missingHttpIdHeaderException)
+        responseOut.sendNext(HPackSpecExamples.FirstResponse.addAttribute(Http2.streamId, streamId))
         val headerPayload = expectHeaderBlock(1)
         headerPayload shouldBe HPackSpecExamples.C61FirstResponseWithHuffman
       }
@@ -181,6 +203,42 @@ class Http2ServerSpec extends AkkaSpec("""
           protocol = HttpProtocols.`HTTP/2.0`))
         sendHEADERS(streamId, endStream = true, endHeaders = true, requestHeaderBlock)
         expectRequest().headers shouldBe expectedRequest.headers
+      }
+
+      "acknowledge change to SETTINGS_HEADER_TABLE_SIZE in next HEADER frame" in new TestSetup with RequestResponseProbes {
+        sendSETTING(SettingIdentifier.SETTINGS_HEADER_TABLE_SIZE, 8192)
+        expectSettingsAck()
+
+        val headerBlock = HPackSpecExamples.C41FirstRequestWithHuffman
+
+        sendHEADERS(1, endStream = true, endHeaders = true, headerBlock)
+        requestIn.ensureSubscription()
+        requestIn.expectNoMessage(100.millis)
+
+        val request = expectRequestRaw()
+
+        request.method shouldBe HttpMethods.GET
+        request.uri shouldBe Uri("http://www.example.com/")
+
+        val streamId = request.attribute(Http2.streamId).getOrElse(Http2Compliance.missingHttpIdHeaderException)
+        responseOut.sendNext(HPackSpecExamples.FirstResponse.addAttribute(Http2.streamId, streamId))
+        val headerPayload = expectHeaderBlock(1)
+
+        // Dynamic Table Size Update (https://tools.ietf.org/html/rfc7541#section-6.3) is
+        //
+        // 0   1   2   3   4   5   6   7
+        // +---+---+---+---+---+---+---+---+
+        // | 0 | 0 | 1 |   Max size (5+)   |
+        // +---+---------------------------+
+        //
+        // 8192 is 10000000000000 = 14 bits, i.e. needs more than 4 bits
+        // 8192 - 16 = 8176 = 111111 1110000
+        // 001 11111 = 63
+        // 1 1110000 = 225
+        // 0 0111111 = 63
+
+        val dynamicTableUpdateTo8192 = ByteString(63, 225, 63)
+        headerPayload shouldBe dynamicTableUpdateTo8192 ++ HPackSpecExamples.C61FirstResponseWithHuffman
       }
     }
 
@@ -247,6 +305,32 @@ class Http2ServerSpec extends AkkaSpec("""
         val error = entityDataIn.expectError()
         error.getMessage shouldBe "Stream with ID [1] was closed by peer with code INTERNAL_ERROR(0x02)"
       }
+
+      // Reproducing https://github.com/akka/akka-http/issues/2957
+      "close the stream when we receive a RST after we have half-closed ourselves as well" in new WaitingForRequestData {
+        // Client sends the request, but doesn't close the stream yet. This is a bit weird, but it's whet grpcurl does ;)
+        sendDATA(streamId = TheStreamId, endStream = false, ByteString(0, 0, 0, 0, 0x10, 0x22, 0x0e) ++ ByteString.fromString("GreeterService"))
+
+        // We emit a 404 response, half-closing the stream.
+        emitResponse(streamId = TheStreamId, HttpResponse(StatusCodes.NotFound))
+
+        // The client closes the stream with a protocol error. This is somewhat questionable but it's what grpc-go does
+        sendRST_STREAM(streamId = TheStreamId, ErrorCode.PROTOCOL_ERROR)
+        entityDataIn.expectError()
+        // Wait to give the warning (that we hope not to see) time to pop up.
+        Thread.sleep(100)
+      }
+      "not fail the whole connection when one stream is RST twice" in new WaitingForRequestData {
+        sendRST_STREAM(TheStreamId, ErrorCode.STREAM_CLOSED)
+        val error = entityDataIn.expectError()
+        error.getMessage shouldBe "Stream with ID [1] was closed by peer with code STREAM_CLOSED(0x05)"
+        expectNoBytes(100.millis)
+
+        // https://http2.github.io/http2-spec/#StreamStates
+        // Endpoints MUST ignore WINDOW_UPDATE or RST_STREAM frames received in this state,
+        sendRST_STREAM(TheStreamId, ErrorCode.STREAM_CLOSED)
+        expectNoBytes(100.millis)
+      }
       "send RST_STREAM if entity stream is canceled" in new WaitingForRequestData {
         val data1 = ByteString("abcdef")
         sendDATA(TheStreamId, endStream = false, data1)
@@ -258,7 +342,7 @@ class Http2ServerSpec extends AkkaSpec("""
         expectRST_STREAM(TheStreamId, ErrorCode.CANCEL)
       }
       "send out WINDOW_UPDATE frames when request data is read so that the stream doesn't stall" in new WaitingForRequestData {
-        (1 to 10).foreach { _ ⇒
+        (1 to 10).foreach { _ =>
           val bytesSent = sendWindowFullOfData()
           bytesSent should be > 0
           entityDataIn.expectBytes(bytesSent)
@@ -315,9 +399,9 @@ class Http2ServerSpec extends AkkaSpec("""
         val response = HttpResponse(entity = HttpEntity(ContentTypes.`application/octet-stream`, ByteString("abcde")))
         emitResponse(TheStreamId, response)
         val pairs = expectDecodedResponseHEADERSPairs(streamId = TheStreamId, endStream = false).toMap
-        pairs should contain(":status" → "200")
-        pairs should contain("content-length" → "5")
-        pairs should contain("content-type" → "application/octet-stream")
+        pairs should contain(":status" -> "200")
+        pairs should contain("content-length" -> "5")
+        pairs should contain("content-type" -> "application/octet-stream")
       }
 
       "send entity data as data frames" in new WaitingForResponseDataSetup {
@@ -347,6 +431,37 @@ class Http2ServerSpec extends AkkaSpec("""
         sendRST_STREAM(TheStreamId, ErrorCode.CANCEL)
         entityDataOut.expectCancellation()
       }
+
+      "handle RST_STREAM while data is waiting in outgoing stream buffer" in new WaitingForResponseDataSetup {
+        val data1 = ByteString("abcd")
+        entityDataOut.sendNext(data1)
+
+        sendRST_STREAM(TheStreamId, ErrorCode.CANCEL)
+
+        entityDataOut.expectCancellation()
+        toNet.expectNoBytes(100.millis) // the whole stage failed with bug #2236
+      }
+
+      "handle RST_STREAM while waiting for a window update" in new WaitingForResponseDataSetup {
+        entityDataOut.sendNext(bytes(70000, 0x23)) // 70000 > Http2Protocol.InitialWindowSize
+        sendWINDOW_UPDATE(TheStreamId, 10000) // enough window for the stream but not for the window
+
+        expectDATA(TheStreamId, false, Http2Protocol.InitialWindowSize)
+
+        // enough stream-level WINDOW, but too little connection-level WINDOW
+        expectNoBytes(100.millis)
+
+        // now the demuxer is in the WaitingForConnectionWindow state, cancel the connection
+        sendRST_STREAM(TheStreamId, ErrorCode.CANCEL)
+
+        entityDataOut.expectCancellation()
+        expectNoBytes(100.millis)
+
+        // now increase connection-level window again and see if everything still works
+        sendWINDOW_UPDATE(0, 10000)
+        expectNoBytes(100.millis) // don't expect anything, stream has been cancelled in the meantime
+      }
+
       "cancel entity data source when peer sends RST_STREAM before entity is subscribed" in new TestSetup with RequestResponseProbes with AutomaticHpackWireSupport {
         val theRequest = HttpRequest(protocol = HttpProtocols.`HTTP/2.0`)
         sendRequest(1, theRequest)
@@ -357,7 +472,7 @@ class Http2ServerSpec extends AkkaSpec("""
         val entityDataOut = TestPublisher.probe[ByteString]()
         val response = HttpResponse(entity = HttpEntity(ContentTypes.`application/octet-stream`, Source.fromPublisher(entityDataOut)))
         emitResponse(1, response)
-        expectNoBytes() // don't expect response on closed connection
+        expectNoBytes(100.millis) // don't expect response on closed connection
         entityDataOut.expectCancellation()
       }
 
@@ -366,8 +481,12 @@ class Http2ServerSpec extends AkkaSpec("""
         entityDataOut.sendNext(data1)
         expectDATA(TheStreamId, endStream = false, data1)
 
-        entityDataOut.sendError(new RuntimeException with NoStackTrace)
-        expectRST_STREAM(1, ErrorCode.INTERNAL_ERROR)
+        class MyProblem extends RuntimeException
+
+        EventFilter[MyProblem](pattern = "Substream 1 failed with .*", occurrences = 1).intercept {
+          entityDataOut.sendError(new MyProblem)
+          expectRST_STREAM(1, ErrorCode.INTERNAL_ERROR)
+        }
       }
       "fail if advertised content-length doesn't match" in pending
 
@@ -378,7 +497,7 @@ class Http2ServerSpec extends AkkaSpec("""
         entityDataOut.sendNext(bytes(70000, 0x23)) // 70000 > Http2Protocol.InitialWindowSize
         expectDATA(TheStreamId, false, Http2Protocol.InitialWindowSize)
 
-        expectNoBytes()
+        expectNoBytes(100.millis)
 
         sendWINDOW_UPDATE(TheStreamId, 10000) // > than the remaining bytes (70000 - InitialWindowSize)
         sendWINDOW_UPDATE(0, 10000)
@@ -410,9 +529,9 @@ class Http2ServerSpec extends AkkaSpec("""
          * Loop that checks for a while that publisherProbe has outstanding demand and runs body to fulfill it
          * Will fail if there's still demand after the timeout.
          */
-        def fulfillDemandWithin(publisherProbe: TestPublisher.Probe[_], timeout: FiniteDuration)(body: ⇒ Unit): Unit = {
+        def fulfillDemandWithin(publisherProbe: TestPublisher.Probe[_], timeout: FiniteDuration)(body: => Unit): Unit = {
           // HACK to support `expectRequest` with a timeout
-          def within[T](publisherProbe: TestPublisher.Probe[_], dur: FiniteDuration)(t: ⇒ T): T = {
+          def within[T](publisherProbe: TestPublisher.Probe[_], dur: FiniteDuration)(t: => T): T = {
             val field = classOf[ManualProbe[_]].getDeclaredField("probe")
             field.setAccessible(true)
             field.get(publisherProbe).asInstanceOf[TestProbe].within(dur)(t)
@@ -425,7 +544,7 @@ class Http2ServerSpec extends AkkaSpec("""
 
             try expectRequest(10.millis.dilated)
             catch {
-              case ex: Throwable ⇒ // ignore error here
+              case ex: Throwable => // ignore error here
             }
             publisherProbe.pending shouldBe 0 // fail here if there's still demand after the timeout
           }
@@ -475,7 +594,7 @@ class Http2ServerSpec extends AkkaSpec("""
 
         val response = HttpResponse(entity = HttpEntity.Chunked(
           ContentTypes.`application/octet-stream`,
-          Source.queue[HttpEntity.ChunkStreamPart](100, OverflowStrategies.Fail)
+          Source.queue[HttpEntity.ChunkStreamPart](100, OverflowStrategy.fail)
             .mapMaterializedValue(queuePromise.success(_))
         ))
         emitResponse(TheStreamId, response)
@@ -496,7 +615,7 @@ class Http2ServerSpec extends AkkaSpec("""
 
         val response = HttpResponse(entity = HttpEntity.Chunked(
           ContentTypes.`application/octet-stream`,
-          Source.queue[HttpEntity.ChunkStreamPart](100, OverflowStrategies.Fail)
+          Source.queue[HttpEntity.ChunkStreamPart](100, OverflowStrategy.fail)
             .mapMaterializedValue(queuePromise.success(_))
         ))
         emitResponse(TheStreamId, response)
@@ -525,7 +644,7 @@ class Http2ServerSpec extends AkkaSpec("""
 
         val response = HttpResponse(entity = HttpEntity.Chunked(
           ContentTypes.`application/octet-stream`,
-          Source.queue[HttpEntity.ChunkStreamPart](100, OverflowStrategies.Fail)
+          Source.queue[HttpEntity.ChunkStreamPart](100, OverflowStrategy.fail)
             .mapMaterializedValue(queuePromise.success(_))
         ))
         emitResponse(TheStreamId, response)
@@ -649,6 +768,40 @@ class Http2ServerSpec extends AkkaSpec("""
         // also complete stream 1
         sendDataAndExpectOnNet(entity1DataOut, 1, "", endStream = true)
       }
+      "close substreams when connection is shutting down" in StreamTestKit.assertAllStagesStopped(new TestSetup with RequestResponseProbes with AutomaticHpackWireSupport {
+        val requestEntity = HttpEntity.Empty.withContentType(ContentTypes.`application/octet-stream`)
+        val request = HttpRequest(entity = requestEntity)
+
+        sendRequestHEADERS(1, request, false)
+        val req = expectRequest()
+        val reqProbe = ByteStringSinkProbe()
+        req.entity.dataBytes.runWith(reqProbe.sink)
+
+        val responseEntityProbe = TestPublisher.probe[ByteString]()
+        val responseEntity = HttpEntity(ContentTypes.`application/octet-stream`, Source.fromPublisher(responseEntityProbe))
+        val response = HttpResponse(200, entity = responseEntity)
+
+        emitResponse(1, response)
+        expectDecodedResponseHEADERS(1, false)
+
+        // check data flow for request entity
+        sendDATA(1, false, ByteString("ping"))
+        reqProbe.expectUtf8EncodedString("ping")
+
+        // default settings will schedule a connection and a stream-level window update
+        expectWindowUpdate()
+        expectWindowUpdate()
+
+        // check data flow for response entity
+        responseEntityProbe.sendNext(ByteString("pong"))
+        expectDATA(1, false, ByteString("pong"))
+
+        fromNet.sendError(new RuntimeException("Connection broke"))
+
+        // now all stream stages should be closed
+        reqProbe.expectError().getMessage shouldBe "The HTTP/2 connection was shut down while the request was still ongoing"
+        responseEntityProbe.expectCancellation()
+      })
     }
 
     "respect flow-control" should {
@@ -673,6 +826,18 @@ class Http2ServerSpec extends AkkaSpec("""
         expectRST_STREAM(1, ErrorCode.PROTOCOL_ERROR)
       }
 
+      "backpressure incoming frames when outgoing control frame buffer fills" in new TestSetup with HandlerFunctionSupport {
+        override def settings: ServerSettings = super.settings.mapHttp2Settings(_.withOutgoingControlFrameBufferSize(1))
+
+        sendFrame(PingFrame(false, ByteString("abcdefgh")))
+        // now one PING ack buffered
+        // this one fills the input buffer between the probe and the server
+        sendFrame(PingFrame(false, ByteString("abcdefgh")))
+
+        // now there should be no new demand
+        fromNet.pending shouldEqual 0
+        fromNet.expectNoMessage(100.millis)
+      }
     }
 
     "respect settings" should {
@@ -688,7 +853,7 @@ class Http2ServerSpec extends AkkaSpec("""
         val illegalPayload = hex"cafe babe"
         sendFrame(FrameType.SETTINGS, ackFlag, 0, illegalPayload)
 
-        val (lastStreamId, error) = expectGOAWAY()
+        val (_, error) = expectGOAWAY()
         error should ===(ErrorCode.FRAME_SIZE_ERROR)
       }
       "received SETTINGs frame frame with a length other than a multiple of 6 octets (invalid 6_5)" in new TestSetup with RequestResponseProbes {
@@ -696,7 +861,7 @@ class Http2ServerSpec extends AkkaSpec("""
 
         sendFrame(FrameType.SETTINGS, ByteFlag.Zero, 0, data)
 
-        val (lastStreamId, error) = expectGOAWAY()
+        val (_, error) = expectGOAWAY()
         error should ===(ErrorCode.FRAME_SIZE_ERROR)
       }
 
@@ -765,7 +930,7 @@ class Http2ServerSpec extends AkkaSpec("""
         val invalidIdForPing = 1
         sendFrame(FrameType.PING, ByteFlag.Zero, invalidIdForPing, ByteString("abcd1234"))
 
-        val (lastStreamId, errorCode) = expectGOAWAY()
+        val (_, errorCode) = expectGOAWAY()
         errorCode should ===(ErrorCode.PROTOCOL_ERROR)
       }
       "respond to PING frames giving precedence over any other kind pending frame" in pending
@@ -775,12 +940,9 @@ class Http2ServerSpec extends AkkaSpec("""
     "respect the substream state machine" should {
       abstract class SimpleRequestResponseRoundtripSetup extends TestSetup with RequestResponseProbes
 
-      "reject other frame than HEADERS/PUSH_PROMISE in idle state with connection-level PROTOCOL_ERROR (5.1)" inPendingUntilFixed new SimpleRequestResponseRoundtripSetup {
+      "reject other frame than HEADERS/PUSH_PROMISE in idle state with connection-level PROTOCOL_ERROR (5.1)" in new SimpleRequestResponseRoundtripSetup {
         sendDATA(9, endStream = true, HPackSpecExamples.C41FirstRequestWithHuffman)
         expectGOAWAY()
-        // after GOAWAY we expect graceful completion after x amount of time
-        // TODO: completion logic, wait?!
-        expectGracefulCompletion()
       }
       "reject incoming frames on already half-closed substream" in pending
 
@@ -794,21 +956,28 @@ class Http2ServerSpec extends AkkaSpec("""
 
       "reject all other frames while waiting for CONTINUATION frames" in pending
 
-      "reject double sub-streams creation" inPendingUntilFixed new SimpleRequestResponseRoundtripSetup {
+      "ignore mid-stream HEADERS with endStream = true (potential trailers)" in new SimpleRequestResponseRoundtripSetup {
+        sendHEADERS(1, endStream = false, endHeaders = true, HPackSpecExamples.C41FirstRequestWithHuffman)
+        sendHEADERS(1, endStream = true, endHeaders = true, HPackSpecExamples.C41FirstRequestWithHuffman)
+        expectNoBytes(100.millis)
+      }
+
+      "reject HEADERS for already closed streams" in new SimpleRequestResponseRoundtripSetup {
         sendHEADERS(1, endStream = true, endHeaders = true, HPackSpecExamples.C41FirstRequestWithHuffman)
         sendHEADERS(1, endStream = true, endHeaders = true, HPackSpecExamples.C41FirstRequestWithHuffman)
         expectGOAWAY()
-        // after GOAWAY we expect graceful completion after x amount of time
-        // TODO: completion logic, wait?!
-        expectGracefulCompletion()
       }
-      "reject substream creation for streams invalidated by skipped substream IDs" inPendingUntilFixed new SimpleRequestResponseRoundtripSetup {
+
+      "reject mid-stream HEADERS with endStream = false" in new SimpleRequestResponseRoundtripSetup {
+        sendHEADERS(1, endStream = false, endHeaders = true, HPackSpecExamples.C41FirstRequestWithHuffman)
+        sendHEADERS(1, endStream = false, endHeaders = true, HPackSpecExamples.C41FirstRequestWithHuffman)
+        expectGOAWAY()
+      }
+
+      "reject substream creation for streams invalidated by skipped substream IDs" in new SimpleRequestResponseRoundtripSetup {
         sendHEADERS(9, endStream = true, endHeaders = true, HPackSpecExamples.C41FirstRequestWithHuffman)
         sendHEADERS(1, endStream = true, endHeaders = true, HPackSpecExamples.C41FirstRequestWithHuffman)
         expectGOAWAY()
-        // after GOAWAY we expect graceful completion after x amount of time
-        // TODO: completion logic, wait?!
-        expectGracefulCompletion()
       }
     }
 
@@ -827,6 +996,7 @@ class Http2ServerSpec extends AkkaSpec("""
         requestIn.ensureSubscription()
 
         val request = expectRequestRaw()
+        @silent("deprecated")
         val remoteAddressHeader = request.header[headers.`Remote-Address`].get
         remoteAddressHeader.address.getAddress.get().toString shouldBe ("/" + theAddress)
         remoteAddressHeader.address.getPort shouldBe thePort
@@ -855,10 +1025,12 @@ class Http2ServerSpec extends AkkaSpec("""
     "must not swallow errors / warnings" in pending
   }
 
-  protected /* To make ByteFlag warnings go away */ abstract class TestSetupWithoutHandshake {
+  protected /* To make ByteFlag warnings go away */ abstract class TestSetupWithoutHandshake extends Http2FrameProbeDelegator {
     implicit def ec = system.dispatcher
 
-    val toNet = ByteStringSinkProbe()
+    val framesOut: Http2FrameProbe = Http2FrameProbe()
+    override def frameProbeDelegate: Http2FrameProbe = framesOut
+    val toNet = framesOut.plainDataProbe
     val fromNet = TestPublisher.probe[ByteString]()
 
     def handlerFlow: Flow[HttpRequest, HttpResponse, NotUsed]
@@ -871,113 +1043,15 @@ class Http2ServerSpec extends AkkaSpec("""
 
     final def theServer: BidiFlow[HttpResponse, ByteString, ByteString, HttpRequest, NotUsed] =
       modifyServer(Http2Blueprint.serverStack(settings, system.log))
+        .atop(LogByteStringTools.logByteStringBidi("network-plain-text").addAttributes(Attributes(LogLevels(Logging.DebugLevel, Logging.DebugLevel, Logging.DebugLevel))))
 
     handlerFlow
       .join(theServer)
-      .runWith(Source.fromPublisher(fromNet), toNet.sink)
+      .join(Flow.fromSinkAndSource(toNet.sink, Source.fromPublisher(fromNet)))
+      .withAttributes(Attributes.inputBuffer(1, 1))
+      .run()
 
     def sendBytes(bytes: ByteString): Unit = fromNet.sendNext(bytes)
-    def expectBytes(bytes: ByteString): Unit = toNet.expectBytes(bytes)
-    def expectBytes(num: Int): ByteString = toNet.expectBytes(num)
-    def expectNoBytes(): Unit = toNet.expectNoBytes()
-
-    def expectDATAFrame(streamId: Int): (Boolean, ByteString) = {
-      val (flags, payload) = expectFrameFlagsAndPayload(FrameType.DATA, streamId)
-      updateFromServerWindowForConnection(_ - payload.size)
-      updateFromServerWindows(streamId, _ - payload.size)
-      (Flags.END_STREAM.isSet(flags), payload)
-    }
-
-    def expectDATA(streamId: Int, endStream: Boolean, numBytes: Int): ByteString = {
-      @tailrec def collectMore(collected: ByteString, remainingBytes: Int): ByteString = {
-        val (completed, data) = expectDATAFrame(streamId)
-        data.size should be <= remainingBytes // cannot have more data pending
-        if (data.size < remainingBytes) {
-          completed shouldBe false
-          collectMore(collected ++ data, remainingBytes - data.size)
-        } else {
-          // data.size == remainingBytes, i.e. collection finished
-          if (endStream && !completed) // wait for final empty data frame
-            expectFramePayload(FrameType.DATA, Flags.END_STREAM, streamId) shouldBe ByteString.empty
-          collected ++ data
-        }
-      }
-      collectMore(ByteString.empty, numBytes)
-    }
-
-    def expectDATA(streamId: Int, endStream: Boolean, data: ByteString): Unit =
-      expectDATA(streamId, endStream, data.length) shouldBe data
-
-    def expectRST_STREAM(streamId: Int, errorCode: ErrorCode): Unit =
-      expectRST_STREAM(streamId) shouldBe errorCode
-
-    def expectRST_STREAM(streamId: Int): ErrorCode = {
-      val payload = expectFramePayload(FrameType.RST_STREAM, ByteFlag.Zero, streamId)
-      ErrorCode.byId(new ByteReader(payload).readIntBE())
-    }
-
-    def autoFrameHandler: PartialFunction[FrameHeader, Unit] = {
-      case FrameHeader(FrameType.WINDOW_UPDATE, _, streamId, payloadLength) ⇒
-        val data = expectBytes(payloadLength)
-        val windowSizeIncrement = new ByteReader(data).readIntBE()
-
-        if (streamId == 0) updateToServerWindowForConnection(_ + windowSizeIncrement)
-        else updateToServerWindows(streamId, _ + windowSizeIncrement)
-    }
-
-    /**
-     * If the lastStreamId should not be asserted keep it as a negative value (which is never a real stream id)
-     * @return pair of `lastStreamId` and the [[ErrorCode]]
-     */
-    def expectGOAWAY(lastStreamId: Int = -1): (Int, ErrorCode) = {
-      // GOAWAY is always written to stream zero:
-      //   The GOAWAY frame applies to the connection, not a specific stream.
-      //   An endpoint MUST treat a GOAWAY frame with a stream identifier other than 0x0
-      //   as a connection error (Section 5.4.1) of type PROTOCOL_ERROR.
-      val payload = expectFramePayload(FrameType.GOAWAY, ByteFlag.Zero, streamId = 0)
-      val reader = new ByteReader(payload)
-      val incomingLastStreamId = reader.readIntBE()
-      if (lastStreamId > 0) incomingLastStreamId should ===(lastStreamId)
-      (lastStreamId, ErrorCode.byId(reader.readIntBE()))
-    }
-
-    def expectSettingsAck() = expectFrame(FrameType.SETTINGS, Flags.ACK, 0, ByteString.empty)
-
-    def expectFrame(frameType: FrameType, expectedFlags: ByteFlag, streamId: Int, payload: ByteString) =
-      expectFramePayload(frameType, expectedFlags, streamId) should ===(payload)
-
-    def expectFramePayload(frameType: FrameType, expectedFlags: ByteFlag, streamId: Int): ByteString = {
-      val (flags, data) = expectFrameFlagsAndPayload(frameType, streamId)
-      expectedFlags shouldBe flags
-      data
-    }
-    final def expectFrameFlagsAndPayload(frameType: FrameType, streamId: Int): (ByteFlag, ByteString) = {
-      val (flags, gotStreamId, data) = expectFrameFlagsStreamIdAndPayload(frameType)
-      gotStreamId shouldBe streamId
-      (flags, data)
-    }
-    final def expectFrameFlagsStreamIdAndPayload(frameType: FrameType): (ByteFlag, Int, ByteString) = {
-      val header = expectFrameHeader()
-      header.frameType shouldBe frameType
-      (header.flags, header.streamId, expectBytes(header.payloadLength))
-    }
-
-    def expectFrameHeader(): FrameHeader = {
-      val headerBytes = expectBytes(9)
-
-      val reader = new ByteReader(headerBytes)
-      val length = reader.readShortBE() << 8 | reader.readByte()
-      val tpe = Http2Protocol.FrameType.byId(reader.readByte())
-      val flags = new ByteFlag(reader.readByte())
-      val streamId = reader.readIntBE()
-
-      FrameHeader(tpe, flags, streamId, length)
-    }
-
-    /** Collect a header block maybe spanning several frames */
-    def expectHeaderBlock(streamId: Int, endStream: Boolean = true): ByteString =
-      // FIXME: also collect CONTINUATION frames as long as END_HEADERS is not set
-      expectFramePayload(FrameType.HEADERS, Flags.END_STREAM.ifSet(endStream) | Flags.END_HEADERS, streamId)
 
     def sendFrame(frame: FrameEvent): Unit =
       sendBytes(FrameRenderer.render(frame))
@@ -1004,7 +1078,7 @@ class Http2ServerSpec extends AkkaSpec("""
       sendBytes(FrameRenderer.render(PriorityFrame(streamId, exclusiveFlag, streamDependency, weight)))
 
     def sendRST_STREAM(streamId: Int, errorCode: ErrorCode): Unit = {
-      implicit val bigEndian = ByteOrder.BIG_ENDIAN
+      implicit val bigEndian: ByteOrder = ByteOrder.BIG_ENDIAN
       val bb = new ByteStringBuilder
       bb.putInt(errorCode.id)
       sendFrame(FrameType.RST_STREAM, ByteFlag.Zero, streamId, bb.result())
@@ -1017,56 +1091,48 @@ class Http2ServerSpec extends AkkaSpec("""
     }
 
     def expectWindowUpdate(): Unit =
-      expectFrameFlagsStreamIdAndPayload(FrameType.WINDOW_UPDATE) match {
-        case (flags, streamId, payload) ⇒
+      framesOut.expectFrameFlagsStreamIdAndPayload(FrameType.WINDOW_UPDATE) match {
+        case (flags, streamId, payload) =>
           // TODO: DRY up with autoFrameHandler
           val windowSizeIncrement = new ByteReader(payload).readIntBE()
 
           if (streamId == 0) updateToServerWindowForConnection(_ + windowSizeIncrement)
           else updateToServerWindows(streamId, _ + windowSizeIncrement)
       }
+
     final def pollForWindowUpdates(duration: FiniteDuration): Unit =
       try {
         toNet.within(duration)(expectWindowUpdate())
 
         pollForWindowUpdates(duration)
       } catch {
-        case e: AssertionError if e.getMessage contains "Expected OnNext(_), yet no element signaled during" ⇒
+        case e: AssertionError if e.getMessage contains "but only got [0] bytes" =>
         // timeout, that's expected
+        case e: AssertionError if (e.getMessage contains "block took") && (e.getMessage contains "exceeding") =>
+          // pause like GC, poll again just to be sure
+          pollForWindowUpdates(duration)
       }
 
     // keep counters that are updated on outgoing sendDATA and incoming WINDOW_UPDATE frames
-    private var toServerWindows = Map.empty[Int, Int].withDefaultValue(Http2Protocol.InitialWindowSize)
+    private var toServerWindows: Map[Int, Int] = Map.empty.withDefaultValue(Http2Protocol.InitialWindowSize)
     private var toServerWindowForConnection = Http2Protocol.InitialWindowSize
     def remainingToServerWindowForConnection: Int = toServerWindowForConnection
     def remainingToServerWindowFor(streamId: Int): Int = toServerWindows(streamId) min remainingToServerWindowForConnection
 
-    private var fromServerWindows = Map.empty[Int, Int].withDefaultValue(Http2Protocol.InitialWindowSize)
-    private var fromServerWindowForConnection = Http2Protocol.InitialWindowSize
-    // keep counters that are updated for incoming DATA frames and outgoing WINDOW_UPDATE frames
-    def remainingFromServerWindowForConnection: Int = fromServerWindowForConnection
-    def remainingFromServerWindowFor(streamId: Int): Int = fromServerWindows(streamId) min remainingFromServerWindowForConnection
+    def updateWindowMap(streamId: Int, update: Int => Int): Map[Int, Int] => Map[Int, Int] =
+      map => map.updated(streamId, update(map(streamId)))
 
-    def updateWindowMap(streamId: Int, update: Int ⇒ Int): Map[Int, Int] ⇒ Map[Int, Int] =
-      map ⇒ map.updated(streamId, update(map(streamId)))
-
-    def safeUpdate(update: Int ⇒ Int): Int ⇒ Int = { oldValue ⇒
+    def safeUpdate(update: Int => Int): Int => Int = { oldValue =>
       val newValue = update(oldValue)
       newValue should be >= 0
       newValue
     }
 
-    def updateToServerWindows(streamId: Int, update: Int ⇒ Int): Unit =
+    def updateToServerWindows(streamId: Int, update: Int => Int): Unit =
       toServerWindows = updateWindowMap(streamId, safeUpdate(update))(toServerWindows)
-    def updateToServerWindowForConnection(update: Int ⇒ Int): Unit =
+    def updateToServerWindowForConnection(update: Int => Int): Unit =
       toServerWindowForConnection = safeUpdate(update)(toServerWindowForConnection)
-
-    def updateFromServerWindows(streamId: Int, update: Int ⇒ Int): Unit =
-      fromServerWindows = updateWindowMap(streamId, safeUpdate(update))(fromServerWindows)
-    def updateFromServerWindowForConnection(update: Int ⇒ Int): Unit =
-      fromServerWindowForConnection = safeUpdate(update)(fromServerWindowForConnection)
   }
-  case class FrameHeader(frameType: FrameType, flags: ByteFlag, streamId: Int, payloadLength: Int)
 
   /** Basic TestSetup that has already passed the exchange of the connection preface */
   abstract class TestSetup extends TestSetupWithoutHandshake {
@@ -1083,7 +1149,7 @@ class Http2ServerSpec extends AkkaSpec("""
     def sendHEADERS(streamId: Int, endStream: Boolean, headers: Seq[HttpHeader]): Unit =
       sendHEADERS(streamId, endStream = endStream, endHeaders = true, encodeHeaders(headers))
 
-    def sendRequest(streamId: Int, request: HttpRequest)(implicit mat: Materializer): Unit = {
+    def sendRequest(streamId: Int, request: HttpRequest): Unit = {
       val isEmpty = request.entity.isKnownEmpty
       sendHEADERS(streamId, endStream = isEmpty, endHeaders = true, encodeRequestHeaders(request))
 
@@ -1095,7 +1161,7 @@ class Http2ServerSpec extends AkkaSpec("""
       val headerBlockBytes = expectHeaderBlock(streamId, endStream)
       val decoded = decodeHeadersToResponse(headerBlockBytes)
       // filter date to make it easier to test
-      decoded.withHeaders(decoded.headers.filterNot(h ⇒ h.is("date")))
+      decoded.withHeaders(decoded.headers.filterNot(h => h.is("date")))
     }
 
     def expectDecodedResponseHEADERSPairs(streamId: Int, endStream: Boolean = true): Seq[(String, String)] = {
@@ -1113,20 +1179,20 @@ class Http2ServerSpec extends AkkaSpec("""
 
     def headerPairsForRequest(request: HttpRequest): Seq[(String, String)] =
       Seq(
-        ":method" → request.method.value,
-        ":scheme" → request.uri.scheme.toString,
-        ":path" → request.uri.path.toString,
-        ":authority" → request.uri.authority.toString.drop(2),
-        "content-type" → request.entity.contentType.render(new StringRendering).get
+        ":method" -> request.method.value,
+        ":scheme" -> request.uri.scheme.toString,
+        ":path" -> request.uri.path.toString,
+        ":authority" -> request.uri.authority.toString.drop(2),
+        "content-type" -> request.entity.contentType.render(new StringRendering).get
       ) ++
         request.entity.contentLengthOption.flatMap {
-          case len if len != 0 ⇒ Some("content-length" → len.toString)
-          case _               ⇒ None
+          case len if len != 0 => Some("content-length" -> len.toString)
+          case _               => None
         }.toSeq ++
         headerPairsForHeaders(request.headers.filter(_.renderInRequests))
 
     def headerPairsForHeaders(headers: Seq[HttpHeader]): Seq[(String, String)] =
-      headers.map(h ⇒ h.lowercaseName → h.value)
+      headers.map(h => h.lowercaseName -> h.value)
 
     def encodeHeaderPairs(headerPairs: Seq[(String, String)]): ByteString = {
       val bos = new ByteArrayOutputStream()
@@ -1146,17 +1212,17 @@ class Http2ServerSpec extends AkkaSpec("""
 
       decoder.decode(bis, new HeaderListener {
         def addHeader(name: Array[Byte], value: Array[Byte], sensitive: Boolean): Unit =
-          hs += new String(name) → new String(value)
+          hs += new String(name) -> new String(value)
       })
       hs.result()
     }
     def decodeHeadersToResponse(bytes: ByteString): HttpResponse =
-      decodeHeaders(bytes).foldLeft(HttpResponse())((old, header) ⇒ header match {
-        case (":status", value)                             ⇒ old.copy(status = value.toInt)
-        case ("content-length", value) if value.toLong == 0 ⇒ old.copy(entity = HttpEntity.Empty)
-        case ("content-length", value)                      ⇒ old.copy(entity = HttpEntity.Default(old.entity.contentType, value.toLong, Source.empty))
-        case ("content-type", value)                        ⇒ old.copy(entity = old.entity.withContentType(ContentType.parse(value).right.get))
-        case (name, value)                                  ⇒ old.addHeader(RawHeader(name, value)) // FIXME: decode to modeled headers
+      decodeHeaders(bytes).foldLeft(HttpResponse())((old, header) => header match {
+        case (":status", value)                             => old.withStatus(value.toInt)
+        case ("content-length", value) if value.toLong == 0 => old.withEntity(HttpEntity.Empty)
+        case ("content-length", value)                      => old.withEntity(HttpEntity.Default(old.entity.contentType, value.toLong, Source.empty))
+        case ("content-type", value)                        => old.withEntity(old.entity.withContentType(ContentType.parse(value).right.get))
+        case (name, value)                                  => old.addHeader(RawHeader(name, value)) // FIXME: decode to modeled headers
       })
   }
 
@@ -1168,10 +1234,10 @@ class Http2ServerSpec extends AkkaSpec("""
     def handlerFlow: Flow[HttpRequest, HttpResponse, NotUsed] =
       Flow.fromSinkAndSource(Sink.fromSubscriber(requestIn), Source.fromPublisher(responseOut))
 
-    def expectRequest(): HttpRequest = requestIn.requestNext().removeHeader("x-http2-stream-id")
+    def expectRequest(): HttpRequest = requestIn.requestNext().removeAttribute(Http2.streamId)
     def expectRequestRaw(): HttpRequest = requestIn.requestNext() // TODO, make it so that internal headers are not listed in `headers` etc?
     def emitResponse(streamId: Int, response: HttpResponse): Unit =
-      responseOut.sendNext(response.addHeader(Http2StreamIdHeader(streamId)))
+      responseOut.sendNext(response.addAttribute(Http2.streamId, streamId))
 
     def expectGracefulCompletion(): Unit = {
       toNet.expectComplete()
@@ -1182,8 +1248,8 @@ class Http2ServerSpec extends AkkaSpec("""
   /** Provides the user handler flow as a handler function */
   trait HandlerFunctionSupport extends TestSetupWithoutHandshake {
     def parallelism: Int = 2
-    def handler: HttpRequest ⇒ Future[HttpResponse] =
-      _ ⇒ Future.successful(HttpResponse())
+    def handler: HttpRequest => Future[HttpResponse] =
+      _ => Future.successful(HttpResponse())
 
     def handlerFlow: Flow[HttpRequest, HttpResponse, NotUsed] =
       Http2Blueprint.handleWithStreamIdHeader(parallelism)(handler)

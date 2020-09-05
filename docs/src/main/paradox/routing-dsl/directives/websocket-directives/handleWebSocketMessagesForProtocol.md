@@ -4,19 +4,19 @@
 
 ## Signature
 
-@@signature [WebSocketDirectives.scala]($akka-http$/akka-http/src/main/scala/akka/http/scaladsl/server/directives/WebSocketDirectives.scala) { #handleWebSocketMessagesForProtocol }
+@@signature [WebSocketDirectives.scala](/akka-http/src/main/scala/akka/http/scaladsl/server/directives/WebSocketDirectives.scala) { #handleWebSocketMessagesForProtocol }
 
 @@@
 
 ## Description
 
 Handles WebSocket requests with the given handler if the given subprotocol is offered in the `Sec-WebSocket-Protocol`
-header of the request and rejects other requests with an @unidoc[ExpectedWebSocketRequestRejection] or an
-@unidoc[UnsupportedWebSocketSubprotocolRejection].
+header of the request and rejects other requests with an @apidoc[ExpectedWebSocketRequestRejection$] or an
+@apidoc[UnsupportedWebSocketSubprotocolRejection].
 
 The directive first checks if the request was a valid WebSocket handshake request and if the request offers the passed
 subprotocol name. If yes, the directive completes the request with the passed handler. Otherwise, the request is
-either rejected with an @unidoc[ExpectedWebSocketRequestRejection] or an @unidoc[UnsupportedWebSocketSubprotocolRejection].
+either rejected with an @apidoc[ExpectedWebSocketRequestRejection$] or an @apidoc[UnsupportedWebSocketSubprotocolRejection].
 
 To support several subprotocols, for example at the same path, several instances of `handleWebSocketMessagesForProtocol` can
 be chained using `~` as you can see in the below example.

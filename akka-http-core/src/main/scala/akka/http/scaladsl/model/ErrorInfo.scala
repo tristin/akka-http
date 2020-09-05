@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.model
@@ -33,20 +33,22 @@ final class ErrorInfo(
   override def canEqual(that: Any): Boolean = that.isInstanceOf[ErrorInfo]
 
   override def equals(that: Any): Boolean = that match {
-    case that: ErrorInfo ⇒ that.canEqual(this) && that.summary == this.summary && that.detail == this.detail && that.errorHeaderName == this.errorHeaderName
-    case _               ⇒ false
+    case that: ErrorInfo => that.canEqual(this) && that.summary == this.summary && that.detail == this.detail && that.errorHeaderName == this.errorHeaderName
+    case _               => false
   }
 
   override def productElement(n: Int): Any = n match {
-    case 0 ⇒ summary
-    case 1 ⇒ detail
-    case 2 ⇒ errorHeaderName
+    case 0 => summary
+    case 1 => detail
+    case 2 => errorHeaderName
   }
 
   override def productArity: Int = 3
 
   /** INTERNAL API */
   @InternalApi private[akka] def this(summary: String, detail: String) = this(summary, detail, "")
+
+  override def toString(): String = s"ErrorInfo($summary, (details omitted), $errorHeaderName)"
 }
 
 object ErrorInfo {
@@ -61,47 +63,49 @@ object ErrorInfo {
    * summary/details information but structures its exception messages accordingly.
    */
   def fromCompoundString(message: String): ErrorInfo = message.split(": ", 2) match {
-    case Array(summary, detail) ⇒ apply(summary, detail)
-    case _                      ⇒ ErrorInfo("", message)
+    case Array(summary, detail) => apply(summary, detail)
+    case _                      => ErrorInfo("", message)
   }
 }
 
 /** Marker for exceptions that provide an ErrorInfo */
-abstract class ExceptionWithErrorInfo(info: ErrorInfo) extends RuntimeException(info.formatPretty)
+abstract class ExceptionWithErrorInfo(val info: ErrorInfo, cause: Throwable) extends RuntimeException(info.formatPretty, cause) {
+  def this(info: ErrorInfo) = this(info, null)
+}
 
-case class IllegalUriException(info: ErrorInfo) extends ExceptionWithErrorInfo(info)
+case class IllegalUriException(override val info: ErrorInfo) extends ExceptionWithErrorInfo(info)
 object IllegalUriException {
   def apply(summary: String, detail: String = ""): IllegalUriException = apply(ErrorInfo(summary, detail))
 }
 
-case class IllegalHeaderException(info: ErrorInfo) extends ExceptionWithErrorInfo(info)
+case class IllegalHeaderException(override val info: ErrorInfo) extends ExceptionWithErrorInfo(info)
 object IllegalHeaderException {
   def apply(summary: String, detail: String = ""): IllegalHeaderException = apply(ErrorInfo(summary, detail))
 }
 
-case class InvalidContentLengthException(info: ErrorInfo) extends ExceptionWithErrorInfo(info)
+case class InvalidContentLengthException(override val info: ErrorInfo) extends ExceptionWithErrorInfo(info)
 object InvalidContentLengthException {
   def apply(summary: String, detail: String = ""): InvalidContentLengthException = apply(ErrorInfo(summary, detail))
 }
 
-case class ParsingException(info: ErrorInfo) extends ExceptionWithErrorInfo(info)
+case class ParsingException(override val info: ErrorInfo) extends ExceptionWithErrorInfo(info)
 object ParsingException {
   def apply(summary: String, detail: String = ""): ParsingException = apply(ErrorInfo(summary, detail))
 }
 
-case class IllegalRequestException(info: ErrorInfo, status: ClientError) extends ExceptionWithErrorInfo(info)
+case class IllegalRequestException(override val info: ErrorInfo, status: ClientError) extends ExceptionWithErrorInfo(info)
 object IllegalRequestException {
   def apply(status: ClientError): IllegalRequestException = apply(ErrorInfo(status.defaultMessage), status)
   def apply(status: ClientError, info: ErrorInfo): IllegalRequestException = apply(info.withFallbackSummary(status.defaultMessage), status)
   def apply(status: ClientError, detail: String): IllegalRequestException = apply(ErrorInfo(status.defaultMessage, detail), status)
 }
 
-case class IllegalResponseException(info: ErrorInfo) extends ExceptionWithErrorInfo(info)
+case class IllegalResponseException(override val info: ErrorInfo) extends ExceptionWithErrorInfo(info)
 object IllegalResponseException {
   def apply(summary: String, detail: String = ""): IllegalResponseException = apply(ErrorInfo(summary, detail))
 }
 
-case class EntityStreamException(info: ErrorInfo) extends ExceptionWithErrorInfo(info)
+case class EntityStreamException(override val info: ErrorInfo) extends ExceptionWithErrorInfo(info)
 object EntityStreamException {
   def apply(summary: String, detail: String = ""): EntityStreamException = apply(ErrorInfo(summary, detail))
 }
@@ -118,10 +122,12 @@ final case class EntityStreamSizeException(limit: Long, actualSize: Option[Long]
 
   override def getMessage = toString
 
-  override def toString =
-    s"EntityStreamSizeException: actual entity size ($actualSize) exceeded content length limit ($limit bytes)! " +
-      s"You can configure this by setting `akka.http.[server|client].parsing.max-content-length` or calling `HttpEntity.withSizeLimit` " +
-      s"before materializing the dataBytes stream."
+  override def toString = {
+    s"EntityStreamSizeException: incoming entity size (${actualSize.getOrElse("while streaming")}) exceeded size limit ($limit bytes)! " +
+      "This may have been a parser limit (set via `akka.http.[server|client].parsing.max-content-length`), " +
+      "a decoder limit (set via `akka.http.routing.decode-max-size`), " +
+      "or a custom limit set with `withSizeLimit`."
+  }
 }
 
 case class RequestTimeoutException(request: HttpRequest, message: String) extends RuntimeException(message)

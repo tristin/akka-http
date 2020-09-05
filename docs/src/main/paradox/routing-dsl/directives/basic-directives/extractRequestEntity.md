@@ -4,15 +4,15 @@
 
 ## Signature
 
-@@signature [BasicDirectives.scala]($akka-http$/akka-http/src/main/scala/akka/http/scaladsl/server/directives/BasicDirectives.scala) { #extractRequestEntity }
+@@signature [BasicDirectives.scala](/akka-http/src/main/scala/akka/http/scaladsl/server/directives/BasicDirectives.scala) { #extractRequestEntity }
 
 @@@
 
 ## Description
 
-Extracts the @unidoc[RequestEntity] from the @unidoc[RequestContext].
+Extracts the @apidoc[RequestEntity] from the @apidoc[RequestContext].
 
-The directive returns a @unidoc[RequestEntity] without unmarshalling the request. To extract domain entity,
+The directive returns a @apidoc[RequestEntity] without unmarshalling the request. To extract domain entity,
 @ref[entity](../marshalling-directives/entity.md) should be used.
 
 ## Example

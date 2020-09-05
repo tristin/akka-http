@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.server
@@ -15,6 +15,7 @@ import akka.stream.scaladsl._
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.common.EntityStreamingSupport
 
+import scala.concurrent.ExecutionContext
 import scala.concurrent.duration._
 import scala.io.StdIn
 
@@ -26,7 +27,7 @@ object TestServer extends App {
     """)
 
   implicit val system = ActorSystem("ServerTest", testConf)
-  import system.dispatcher
+  implicit val ec: ExecutionContext = system.dispatcher
   implicit val materializer = ActorMaterializer()
 
   import spray.json.DefaultJsonProtocol._
@@ -40,22 +41,22 @@ object TestServer extends App {
   import Directives._
 
   def auth: AuthenticatorPF[String] = {
-    case p @ Credentials.Provided(name) if p.verify(name + "-password") ⇒ name
+    case p @ Credentials.Provided(name) if p.verify(name + "-password") => name
   }
 
   // format: OFF
   val routes = {
     get {
       path("") {
-        withRequestTimeout(1.milli, _ ⇒ HttpResponse(
+        withRequestTimeout(1.milli, _ => HttpResponse(
           StatusCodes.EnhanceYourCalm,
-          entity = "Unable to serve response within time limit, please enchance your calm.")) {
+          entity = "Unable to serve response within time limit, please enhance your calm.")) {
           Thread.sleep(1000)
           complete(index)
         }
       } ~
       path("secure") {
-        authenticateBasicPF("My very secure site", auth) { user ⇒
+        authenticateBasicPF("My very secure site", auth) { user =>
           complete(<html> <body> Hello <b>{user}</b>. Access has been granted! </body> </html>)
         }
       } ~
@@ -68,38 +69,38 @@ object TestServer extends App {
       path("tweet") {
         complete(Tweet("Hello, world!"))
       } ~
-      (path("tweets") & parameter('n.as[Int])) { n => 
+      (path("tweets") & parameter("n".as[Int])) { n =>
         get {
           val tweets = Source.repeat(Tweet("Hello, world!")).take(n)
           complete(tweets)
         } ~
         post {
-          entity(asSourceOf[Tweet]) { tweets ⇒
-            onComplete(tweets.runFold(0)({ case (acc, t) => acc + 1 })) { count => 
+          entity(asSourceOf[Tweet]) { tweets =>
+            onComplete(tweets.runFold(0)({ case (acc, t) => acc + 1 })) { count =>
               complete(s"Total tweets received: " + count)
             }
           }
         } ~
         put {
           // checking the alternative syntax also works:
-          entity(as[Source[Tweet, NotUsed]]) { tweets ⇒
-            onComplete(tweets.runFold(0)({ case (acc, t) => acc + 1 })) { count => 
+          entity(as[Source[Tweet, NotUsed]]) { tweets =>
+            onComplete(tweets.runFold(0)({ case (acc, t) => acc + 1 })) { count =>
               complete(s"Total tweets received: " + count)
             }
           }
         }
       }
-    } ~ 
+    } ~
     pathPrefix("inner")(getFromResourceDirectory("someDir"))
   }
   // format: ON
 
-  val bindingFuture = Http().bindAndHandle(routes, interface = "0.0.0.0", port = 8080)
+  val bindingFuture = Http().newServerAt(interface = "0.0.0.0", port = 8080).bind(routes)
 
   println(s"Server online at http://0.0.0.0:8080/\nPress RETURN to stop...")
   StdIn.readLine()
 
-  bindingFuture.flatMap(_.unbind()).onComplete(_ ⇒ system.terminate())
+  bindingFuture.flatMap(_.unbind()).onComplete(_ => system.terminate())
 
   lazy val index =
     <html>

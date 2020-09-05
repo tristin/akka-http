@@ -2,14 +2,14 @@
 
 Akka HTTP supports TLS encryption on the client-side as well as on the @ref[server-side](../server-side/server-https-support.md).
 
-The central vehicle for configuring encryption is the @unidoc[HttpsConnectionContext], which can be created using
-the static method `ConnectionContext.https` which is defined like this:
+The central vehicle for configuring encryption is the @apidoc[HttpsConnectionContext], which can be created using
+the static methods on @apidoc[ConnectionContext]:
 
 Scala
-:  @@snip[ConnectionContext.scala]($akka-http$/akka-http-core/src/main/scala/akka/http/scaladsl/ConnectionContext.scala) { #https-context-creation }
+:  @@snip[ConnectionContext.scala](/akka-http-core/src/main/scala/akka/http/scaladsl/ConnectionContext.scala) { #https-client-context-creation }
 
 Java
-:  @@snip [ConnectionContext.scala]($akka-http$/akka-http-core/src/main/scala/akka/http/javadsl/ConnectionContext.scala) { #https-context-creation }
+:  @@snip [ConnectionContext.scala](/akka-http-core/src/main/scala/akka/http/javadsl/ConnectionContext.scala) { #https-client-context-creation }
 
 In addition to the `outgoingConnection`, `newHostConnectionPool` and `cachedHostConnectionPool` methods the
 @scala[@scaladoc[akka.http.scaladsl.Http](akka.http.scaladsl.Http$)]@java[@javadoc[akka.http.javadsl.Http](akka.http.javadsl.Http)]
@@ -26,8 +26,8 @@ following logic:
  1. If the optional `httpsContext` method parameter is defined it contains the configuration to be used (and thus
 takes precedence over any potentially set default client-side `HttpsContext`).
  2. If the optional `httpsContext` method parameter is undefined (which is the default) the default client-side
-`HttpsContext` is used, which can be set via the `setDefaultClientHttpsContext` on the @unidoc[Http] extension.
- 3. If no default client-side `HttpsContext` has been set via the `setDefaultClientHttpsContext` on the @unidoc[Http]
+`HttpsContext` is used, which can be set via the `setDefaultClientHttpsContext` on the @apidoc[Http$] extension.
+ 3. If no default client-side `HttpsContext` has been set via the `setDefaultClientHttpsContext` on the @apidoc[Http$]
 extension the default system configuration is used.
 
 Usually the process is, if the default system TLS configuration is not good enough for your application's needs,
@@ -52,7 +52,7 @@ SSL Config settings used by Akka HTTP (as well as Streaming TCP) are located und
 
 ## Detailed configuration and workarounds
 
-Akka HTTP relies on [Lightbend SSL-Config](https://lightbend.github.io/ssl-config) which is a library maintained by Lightbend that makes configuring
+Akka HTTP relies on [Lightbend SSL-Config](https://lightbend.github.io/ssl-config/) which is a library maintained by Lightbend that makes configuring
 things related to SSL/TLS much simpler than using the raw SSL APIs provided by the JDK. Please refer to its
 documentation to learn more about it.
 
@@ -89,13 +89,6 @@ and used by Akka since Java 7, and on Java 6 the verification is implemented by 
 
 For further recommended reading we would like to highlight the [fixing hostname verification blog post](https://tersesystems.com/2014/03/23/fixing-hostname-verification/) by blog post by Will Sargent.
 
-### Server Name Indication (SNI)
-
-SNI is an TLS extension which aims to guard against man-in-the-middle attacks. It does so by having the client send the
-name of the virtual domain it is expecting to talk to as part of the TLS handshake.
-
-It is specified as part of [RFC 6066](https://tools.ietf.org/html/rfc6066#page-6).
-
 ### Disabling TLS security features, at your own risk
 
 @@@ warning
@@ -111,13 +104,13 @@ instead of globally configuring it via `application.conf`.
 
 @@@
 
-The following shows an example of disabling SNI for a given connection:
+The following shows an example of disabling hostname verification for a given connection:
 
 Scala
-:  @@snip [HttpsExamplesSpec.scala]($test$/scala/docs/http/scaladsl/HttpsExamplesSpec.scala) { #disable-sni-connection }
+:  @@snip [HttpsExamplesSpec.scala]($test$/scala/docs/http/scaladsl/HttpsExamplesSpec.scala) { #disable-hostname-verification-connection }
 
 Java
-:  @@snip [HttpsExamplesDocTest.java]($test$/java/docs/http/javadsl/HttpsExamplesDocTest.java) { #disable-sni-connection }
+:  @@snip [HttpsExamplesDocTest.java]($test$/java/docs/http/javadsl/HttpsExamplesDocTest.java) { #disable-hostname-verification-connection }
 
-The `badSslConfig` is a copy of the default `AkkaSSLConfig` with the slightly changed configuration to disable SNI.
+The `badSslConfig` is a copy of the default `AkkaSSLConfig` with the slightly changed configuration to disable hostname verification.
 This value can be cached and used for connections which should indeed not use this feature.

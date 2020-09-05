@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package docs.http.javadsl.server;
@@ -24,7 +24,6 @@ import akka.http.javadsl.testkit.TestRoute;
 
 //#simple-handler-example-full
 import static akka.http.javadsl.server.Directives.get;
-import static akka.http.javadsl.server.Directives.route;
 import static akka.http.javadsl.server.Directives.path;
 import static akka.http.javadsl.server.Directives.post;
 //#simple-handler
@@ -74,7 +73,7 @@ public class HandlerExampleDocTest extends JUnitRouteTest {
       //#simple-handler
 
       Route createRoute() {
-        return route(
+        return concat(
           get(() ->
             handlerString
           ),
@@ -126,9 +125,9 @@ public class HandlerExampleDocTest extends JUnitRouteTest {
       //#handler2
 
       Route createRoute() {
-        return route(
+        return concat(
           get(() ->
-            pathPrefix("calculator", () -> route(
+            pathPrefix("calculator", () -> concat(
               path("multiply", () ->
                 multiplyXAndYParam
               ),
@@ -224,9 +223,9 @@ public class HandlerExampleDocTest extends JUnitRouteTest {
       //#async-handler-2
 
       Route createRoute() {
-        return route(
+        return concat(
           get(() ->
-            pathPrefix("calculator", () -> route(
+            pathPrefix("calculator", () -> concat(
               multiplyAsyncRoute,
               addAsyncRoute
             ))

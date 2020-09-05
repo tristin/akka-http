@@ -1,12 +1,10 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package docs.http.scaladsl.server.directives
 
 import java.util.concurrent.TimeUnit
-
-import docs.http.scaladsl.server.RoutingSpec
 
 import scala.concurrent.Future
 import scala.concurrent.duration._
@@ -15,17 +13,16 @@ import akka.http.scaladsl.server.{ CircuitBreakerOpenRejection, ExceptionHandler
 import akka.util.Timeout
 import akka.http.scaladsl.model._
 import StatusCodes._
+import akka.http.scaladsl.server.RoutingSpec
 import akka.pattern.CircuitBreaker
+import docs.CompileOnlySpec
 
-// format: OFF
-
-class FutureDirectivesExamplesSpec extends RoutingSpec {
+class FutureDirectivesExamplesSpec extends RoutingSpec with CompileOnlySpec {
   object TestException extends Throwable
 
   implicit val myExceptionHandler =
     ExceptionHandler {
-      case TestException => ctx =>
-        ctx.complete((InternalServerError, "Unsuccessful future!"))
+      case TestException => complete(InternalServerError -> "Unsuccessful future!")
     }
 
   implicit val responseTimeout = Timeout(2, TimeUnit.SECONDS)
@@ -40,7 +37,7 @@ class FutureDirectivesExamplesSpec extends RoutingSpec {
       path("divide" / IntNumber / IntNumber) { (a, b) =>
         onComplete(divide(a, b)) {
           case Success(value) => complete(s"The result was $value")
-          case Failure(ex)    => complete((InternalServerError, s"An error occurred: ${ex.getMessage}"))
+          case Failure(ex)    => complete(InternalServerError, s"An error occurred: ${ex.getMessage}")
         }
       }
 
@@ -63,7 +60,8 @@ class FutureDirectivesExamplesSpec extends RoutingSpec {
     }
 
     val resetTimeout = 1.second
-    val breaker = new CircuitBreaker(system.scheduler,
+    val breaker = new CircuitBreaker(
+      system.scheduler,
       maxFailures = 1,
       callTimeout = 5.seconds,
       resetTimeout
@@ -73,7 +71,7 @@ class FutureDirectivesExamplesSpec extends RoutingSpec {
       path("divide" / IntNumber / IntNumber) { (a, b) =>
         onCompleteWithBreaker(breaker)(divide(a, b)) {
           case Success(value) => complete(s"The result was $value")
-          case Failure(ex)    => complete((InternalServerError, s"An error occurred: ${ex.getMessage}"))
+          case Failure(ex)    => complete(InternalServerError, s"An error occurred: ${ex.getMessage}")
         }
       }
 
@@ -102,16 +100,18 @@ class FutureDirectivesExamplesSpec extends RoutingSpec {
   "onSuccess" in {
     //#onSuccess
     val route =
-      path("success") {
-        onSuccess(Future { "Ok" }) { extraction =>
-          complete(extraction)
+      concat(
+        path("success") {
+          onSuccess(Future { "Ok" }) { extraction =>
+            complete(extraction)
+          }
+        },
+        path("failure") {
+          onSuccess(Future.failed[String](TestException)) { extraction =>
+            complete(extraction)
+          }
         }
-      } ~
-      path("failure") {
-        onSuccess(Future.failed[String](TestException)) { extraction =>
-          complete(extraction)
-        }
-      }
+      )
 
     // tests:
     Get("/success") ~> route ~> check {
@@ -128,16 +128,18 @@ class FutureDirectivesExamplesSpec extends RoutingSpec {
   "completeOrRecoverWith" in {
     //#completeOrRecoverWith
     val route =
-      path("success") {
-        completeOrRecoverWith(Future { "Ok" }) { extraction =>
-          failWith(extraction) // not executed.
+      concat(
+        path("success") {
+          completeOrRecoverWith(Future { "Ok" }) { extraction =>
+            failWith(extraction) // not executed.
+          }
+        },
+        path("failure") {
+          completeOrRecoverWith(Future.failed[String](TestException)) { extraction =>
+            failWith(extraction)
+          }
         }
-      } ~
-      path("failure") {
-        completeOrRecoverWith(Future.failed[String](TestException)) { extraction =>
-          failWith(extraction)
-        }
-      }
+      )
 
     // tests:
     Get("/success") ~> route ~> check {

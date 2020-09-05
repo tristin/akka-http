@@ -1,16 +1,15 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.javadsl;
 
 import akka.event.LoggingAdapter;
-import akka.http.javadsl.*;
 import akka.http.javadsl.model.HttpRequest;
 import akka.http.javadsl.model.HttpResponse;
 import akka.http.javadsl.testkit.JUnitRouteTest;
 import akka.http.scaladsl.settings.ConnectionPoolSettings;
-import akka.japi.Function;
+import akka.japi.function.Function;
 import akka.stream.javadsl.Flow;
 import org.junit.Test;
 
@@ -41,27 +40,25 @@ public class HttpAPIsTest extends JUnitRouteTest {
     ConnectionPoolSettings conSettings = null;
     LoggingAdapter log = null;
 
-    http.bind(toHost("127.0.0.1", 8080), materializer());
-    http.bind(toHost("127.0.0.1", 8080), materializer());
-    http.bind(toHostHttps("127.0.0.1", 8080), materializer());
+    http.newServerAt("127.0.0.1", 8080).connectionSource();
+    http.newServerAt("127.0.0.1", 8080).enableHttps(httpsContext).connectionSource();
 
     final Flow<HttpRequest, HttpResponse, ?> handler = null;
-    http.bindAndHandle(handler, toHost("127.0.0.1", 8080), materializer());
-    http.bindAndHandle(handler, toHost("127.0.0.1", 8080), materializer());
-    http.bindAndHandle(handler, toHostHttps("127.0.0.1", 8080).withCustomHttpsContext(httpsContext), materializer());
+    http.newServerAt("127.0.0.1", 8080).bindFlow(handler);
+    http.newServerAt("127.0.0.1", 8080).enableHttps(httpsContext).bindFlow(handler);
 
     final Function<HttpRequest, CompletionStage<HttpResponse>> handler1 = null;
-    http.bindAndHandleAsync(handler1, toHost("127.0.0.1", 8080), materializer());
-    http.bindAndHandleAsync(handler1, toHostHttps("127.0.0.1", 8080), materializer());
+    http.newServerAt("127.0.0.1", 8080).bind(handler1);
+    http.newServerAt("127.0.0.1", 8080).enableHttps(httpsContext).bind(handler1);
 
     final Function<HttpRequest, HttpResponse> handler2 = null;
-    http.bindAndHandleSync(handler2, toHost("127.0.0.1", 8080), materializer());
-    http.bindAndHandleSync(handler2, toHostHttps("127.0.0.1", 8080), materializer());
+    http.newServerAt("127.0.0.1", 8080).bindSync(handler2);
+    http.newServerAt("127.0.0.1", 8080).enableHttps(httpsContext).bindSync(handler2);
 
     final HttpRequest handler3 = null;
-    http.singleRequest(handler3, materializer());
-    http.singleRequest(handler3, httpsContext, materializer());
-    http.singleRequest(handler3, httpsContext, conSettings, log, materializer());
+    http.singleRequest(handler3);
+    http.singleRequest(handler3, httpsContext);
+    http.singleRequest(handler3, httpsContext, conSettings, log);
 
     http.outgoingConnection("akka.io");
     http.outgoingConnection("akka.io:8080");
@@ -89,18 +86,18 @@ public class HttpAPIsTest extends JUnitRouteTest {
     http.newHostConnectionPool(toHost(""), conSettings, log, materializer());
 
 
-    http.cachedHostConnectionPool("akka.io", materializer());
-    http.cachedHostConnectionPool("https://akka.io", materializer());
-    http.cachedHostConnectionPool("https://akka.io:8080", materializer());
-    http.cachedHostConnectionPool(toHost("akka.io"), materializer());
-    http.cachedHostConnectionPool(toHostHttps("smtp://akka.io"), materializer()); // throws, we explicitly require https or ""
-    http.cachedHostConnectionPool(toHostHttps("https://akka.io:2222"), materializer());
-    http.cachedHostConnectionPool(toHostHttps("akka.io"), materializer());
-    http.cachedHostConnectionPool(toHost("akka.io"), conSettings, log, materializer());
+    http.cachedHostConnectionPool("akka.io");
+    http.cachedHostConnectionPool("https://akka.io");
+    http.cachedHostConnectionPool("https://akka.io:8080");
+    http.cachedHostConnectionPool(toHost("akka.io"));
+    http.cachedHostConnectionPool(toHostHttps("smtp://akka.io")); // throws, we explicitly require https or ""
+    http.cachedHostConnectionPool(toHostHttps("https://akka.io:2222"));
+    http.cachedHostConnectionPool(toHostHttps("akka.io"));
+    http.cachedHostConnectionPool(toHost("akka.io"), conSettings, log);
 
-    http.superPool(materializer());
-    http.superPool(conSettings, log, materializer());
-    http.superPool(conSettings, httpsContext, log, materializer());
+    http.superPool();
+    http.superPool(conSettings, log);
+    http.superPool(conSettings, httpsContext, log);
 
     final ConnectWithHttps connect = toHostHttps("akka.io", 8081).withCustomHttpsContext(httpsContext).withDefaultHttpsContext();
     connect.effectiveHttpsConnectionContext(http.defaultClientHttpsContext()); // usage by us internally
@@ -111,15 +108,15 @@ public class HttpAPIsTest extends JUnitRouteTest {
     final Http http = Http.get(system());
     final HttpsConnectionContext httpsConnectionContext = null;
 
-    http.bind(toHost("127.0.0.1"), materializer()); // 80
-    http.bind(toHost("127.0.0.1", 8080), materializer()); // 8080
+    http.bind(toHost("127.0.0.1")); // 80
+    http.bind(toHost("127.0.0.1", 8080)); // 8080
 
-    http.bind(toHost("https://127.0.0.1"), materializer()); // HTTPS 443
-    http.bind(toHost("https://127.0.0.1", 9090), materializer()); // HTTPS 9090
+    http.bind(toHost("https://127.0.0.1")); // HTTPS 443
+    http.bind(toHost("https://127.0.0.1", 9090)); // HTTPS 9090
 
-    http.bind(toHostHttps("127.0.0.1"), materializer()); // HTTPS 443
-    http.bind(toHostHttps("127.0.0.1").withCustomHttpsContext(httpsConnectionContext), materializer()); // custom HTTPS 443
+    http.bind(toHostHttps("127.0.0.1")); // HTTPS 443
+    http.bind(toHostHttps("127.0.0.1").withCustomHttpsContext(httpsConnectionContext)); // custom HTTPS 443
 
-    http.bind(toHostHttps("http://127.0.0.1"), materializer()); // throws
+    http.bind(toHostHttps("http://127.0.0.1")); // throws
   }
 }

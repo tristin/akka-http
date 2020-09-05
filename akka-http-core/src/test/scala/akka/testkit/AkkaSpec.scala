@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.testkit
@@ -7,8 +7,7 @@ package akka.testkit
 import org.scalactic.{ CanEqual, TypeCheckedTripleEquals }
 
 import language.postfixOps
-import org.scalatest.{ BeforeAndAfterAll, WordSpecLike }
-import org.scalatest.Matchers
+import org.scalatest.BeforeAndAfterAll
 import akka.actor.ActorSystem
 import akka.event.{ Logging, LoggingAdapter }
 
@@ -18,6 +17,8 @@ import com.typesafe.config.{ Config, ConfigFactory }
 import akka.dispatch.Dispatchers
 import akka.testkit.TestEvent._
 import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpecLike
 
 object AkkaSpec {
   val testConf: Config = ConfigFactory.parseString("""
@@ -47,8 +48,8 @@ object AkkaSpec {
     val s = (Thread.currentThread.getStackTrace map (_.getClassName) drop 1)
       .dropWhile(_ matches "(java.lang.Thread|.*AkkaSpec.?$|.*StreamSpec.?$)")
     val reduced = s.lastIndexWhere(_ == clazz.getName) match {
-      case -1 ⇒ s
-      case z  ⇒ s drop (z + 1)
+      case -1 => s
+      case z  => s drop (z + 1)
     }
     reduced.head.replaceFirst(""".*\.""", "").replaceAll("[^a-zA-Z_0-9]", "_")
   }
@@ -56,7 +57,7 @@ object AkkaSpec {
 }
 
 abstract class AkkaSpec(_system: ActorSystem)
-  extends TestKit(_system) with WordSpecLike with Matchers with BeforeAndAfterAll with WatchedByCoroner
+  extends TestKit(_system) with AnyWordSpecLike with Matchers with BeforeAndAfterAll with WatchedByCoroner
   with TypeCheckedTripleEquals with ScalaFutures {
 
   implicit val patience = PatienceConfig(testKitSettings.DefaultTimeout.duration)
@@ -75,25 +76,25 @@ abstract class AkkaSpec(_system: ActorSystem)
 
   override val invokeBeforeAllAndAfterAllEvenIfNoTestsAreExpected = true
 
-  final override def beforeAll {
+  final override def beforeAll(): Unit = {
     startCoroner()
     atStartup()
   }
 
-  final override def afterAll {
+  final override def afterAll(): Unit = {
     beforeTermination()
     shutdown()
     afterTermination()
     stopCoroner()
   }
 
-  protected def atStartup() {}
+  protected def atStartup(): Unit = {}
 
-  protected def beforeTermination() {}
+  protected def beforeTermination(): Unit = {}
 
-  protected def afterTermination() {}
+  protected def afterTermination(): Unit = {}
 
-  def spawn(dispatcherId: String = Dispatchers.DefaultDispatcherId)(body: ⇒ Unit): Unit =
+  def spawn(dispatcherId: String = Dispatchers.DefaultDispatcherId)(body: => Unit): Unit =
     Future(body)(system.dispatchers.lookup(dispatcherId))
 
   override def expectedTestDuration: FiniteDuration = 60 seconds

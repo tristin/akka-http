@@ -4,7 +4,7 @@
 
 ## Signature
 
-@@signature [HeaderDirectives.scala]($akka-http$/akka-http/src/main/scala/akka/http/scaladsl/server/directives/HeaderDirectives.scala) { #headerValuePF }
+@@signature [HeaderDirectives.scala](/akka-http/src/main/scala/akka/http/scaladsl/server/directives/HeaderDirectives.scala) { #headerValuePF }
 
 @@@
 
@@ -15,7 +15,7 @@ result of calling the function.
 
 The `headerValuePF` directive is an alternative syntax version of @ref[headerValue](headerValue.md).
 
-If the function throws an exception the request is rejected with a @unidoc[MalformedHeaderRejection].
+If the function throws an exception the request is rejected with a @apidoc[MalformedHeaderRejection].
 
 If the function is not defined for any header the request is rejected as "NotFound".
 

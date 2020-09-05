@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package docs.http.javadsl.server;
@@ -26,8 +26,6 @@ import static akka.http.javadsl.server.Directives.decodeRequestWith;
 import static akka.http.javadsl.server.Directives.get;
 import static akka.http.javadsl.server.Directives.path;
 import static akka.http.javadsl.server.Directives.post;
-import static akka.http.javadsl.server.Directives.route;
-
 //#example1
 //#custom-handler-example-java
 import static akka.http.javadsl.server.Directives.complete;
@@ -52,7 +50,7 @@ public class RejectionHandlerExamplesTest extends JUnitRouteTest {
   void example1() {
     //#example1
     final Route route = path("order", () ->
-      route(
+      concat(
         get(() ->
           complete("Received GET")
         ),

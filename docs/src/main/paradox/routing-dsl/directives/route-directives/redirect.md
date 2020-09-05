@@ -4,7 +4,7 @@
 
 ## Signature
 
-@@signature [RouteDirectives.scala]($akka-http$/akka-http/src/main/scala/akka/http/scaladsl/server/directives/RouteDirectives.scala) { #redirect }
+@@signature [RouteDirectives.scala](/akka-http/src/main/scala/akka/http/scaladsl/server/directives/RouteDirectives.scala) { #redirect }
 
 @@@
 
@@ -13,10 +13,10 @@
 Completes the request with a redirection response to a given target URI and of a given redirection type (status code).
 
 `redirect` is a convenience helper for completing the request with a redirection response.
-It is equivalent to this snippet relying on the `complete` method on @unidoc[RequestContext] (a directive is also available):
+It is equivalent to this snippet relying on the `complete` method on @apidoc[RequestContext], and a directive is also available:
 
 Scala
-:   @@snip [RequestContextImpl.scala]($akka-http$/akka-http/src/main/scala/akka/http/scaladsl/server/RequestContextImpl.scala) { #red-impl }
+:   @@snip [RequestContextImpl.scala](/akka-http/src/main/scala/akka/http/scaladsl/server/RequestContextImpl.scala) { #red-impl }
 
 Java
 :  @@snip [RouteDirectivesExamplesTest.java]($test$/java/docs/http/javadsl/server/directives/RouteDirectivesExamplesTest.java) { #red-impl }

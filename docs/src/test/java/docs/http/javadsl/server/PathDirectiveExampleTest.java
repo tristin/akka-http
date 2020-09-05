@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package docs.http.javadsl.server;
@@ -15,8 +15,6 @@ import static akka.http.javadsl.server.Directives.path;
 import static akka.http.javadsl.server.Directives.pathEnd;
 import static akka.http.javadsl.server.Directives.pathPrefix;
 import static akka.http.javadsl.server.Directives.pathSingleSlash;
-import static akka.http.javadsl.server.Directives.route;
-
 //#path-examples
 
 public class PathDirectiveExampleTest extends JUnitRouteTest {
@@ -72,7 +70,7 @@ public class PathDirectiveExampleTest extends JUnitRouteTest {
 
     // matches "/user/" with the first subroute, "/user" (without a trailing slash)
     // with the second subroute, and "/user/<user-id>" with the last one.
-    pathPrefix("user", () -> route(
+    pathPrefix("user", () -> concat(
       pathSingleSlash(() ->
         complete(StatusCodes.OK)
       ),

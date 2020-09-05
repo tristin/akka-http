@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2016-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package docs.http.javadsl.server.directives;
@@ -18,7 +18,9 @@ import akka.http.javadsl.server.RequestContext;
 import static akka.http.javadsl.server.directives.CachingDirectives.*;
 //#caching-directives-import
 import scala.concurrent.duration.Duration;
+//#time-unit-import
 import java.util.concurrent.TimeUnit;
+//#time-unit-import
 import akka.http.javadsl.testkit.JUnitRouteTest;
 import org.junit.Test;
 import static org.junit.Assert.assertEquals;
@@ -29,8 +31,8 @@ import akka.http.caching.javadsl.Cache;
 import akka.http.caching.javadsl.CachingSettings;
 import akka.http.caching.javadsl.LfuCacheSettings;
 import akka.http.caching.LfuCache;
-
 //#create-cache-imports
+
 //#cache
 import static akka.http.javadsl.server.Directives.complete;
 import static akka.http.javadsl.server.Directives.extractUri;
@@ -156,11 +158,15 @@ public class CachingDirectivesExamplesTest extends JUnitRouteTest {
 
   @Test
   public void testCreateCache() {
+    //#keyer-function
+
+    // Use the request's URI as the cache's key
     final JavaPartialFunction<RequestContext, Uri> keyerFunction = new JavaPartialFunction<RequestContext, Uri>() {
       public Uri apply(RequestContext in, boolean isCheck) {
         return in.getRequest().getUri();
       }
     };
+    //#keyer-function
 
     final AtomicInteger count = new AtomicInteger(0);
     final Route innerRoute = extractUri(uri ->
@@ -176,6 +182,8 @@ public class CachingDirectivesExamplesTest extends JUnitRouteTest {
       .withTimeToIdle(Duration.create(10, TimeUnit.SECONDS));
     final CachingSettings cachingSettings = defaultCachingSettings.withLfuCacheSettings(lfuCacheSettings);
     final Cache<Uri, RouteResult> lfuCache = LfuCache.create(cachingSettings);
+
+    // Create the route
     final Route route = cache(lfuCache, keyerFunction, () -> innerRoute);
     //#create-cache
 

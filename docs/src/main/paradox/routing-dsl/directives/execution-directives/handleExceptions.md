@@ -4,15 +4,15 @@
 
 ## Signature
 
-@@signature [ExecutionDirectives.scala]($akka-http$/akka-http/src/main/scala/akka/http/scaladsl/server/directives/ExecutionDirectives.scala) { #handleExceptions }
+@@signature [ExecutionDirectives.scala](/akka-http/src/main/scala/akka/http/scaladsl/server/directives/ExecutionDirectives.scala) { #handleExceptions }
 
 @@@
 
 ## Description
 
-Catches exceptions thrown by the inner route and handles them using the specified @unidoc[ExceptionHandler].
+Catches exceptions thrown by the inner route and handles them using the specified @apidoc[ExceptionHandler].
 
-Using this directive is an alternative to using a global implicitly defined @unidoc[ExceptionHandler] that
+Using this directive is an alternative to using a global implicitly defined @apidoc[ExceptionHandler] that
 applies to the complete route.
 
 See @ref[Exception Handling](../../exception-handling.md) for general information about options for handling exceptions.

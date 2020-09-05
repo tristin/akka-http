@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2015-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package docs.http.javadsl.server.directives;
@@ -57,7 +57,6 @@ import static akka.http.javadsl.server.Directives.extractMethod;
 import static akka.http.javadsl.server.Directives.complete;
 import static akka.http.javadsl.server.Directives.get;
 import static akka.http.javadsl.server.Directives.post;
-import static akka.http.javadsl.server.Directives.route;
 import static akka.http.javadsl.server.Directives.overrideMethodWithParameter;
 
 //#overrideMethodWithParameter
@@ -151,8 +150,8 @@ public class MethodDirectivesExamplesTest extends JUnitRouteTest {
   public void testExtractMethodExample() {
     //#extractMethod
 
-    final Route route = route(
-        get(() -> 
+    final Route route = concat(
+        get(() ->
             complete("This is a GET request.")
         ),
         extractMethod(method ->
@@ -170,21 +169,21 @@ public class MethodDirectivesExamplesTest extends JUnitRouteTest {
         "This HEAD request, clearly is not a GET!");
     //#extractMethod
   }
-  
+
   @Test
   public void testOverrideMethodWithParameter() {
     //#overrideMethodWithParameter
 
-    final Route route = route(
-        overrideMethodWithParameter("method", () -> 
-          route(
+    final Route route = concat(
+        overrideMethodWithParameter("method", () ->
+          concat(
             get(() -> complete("This looks like a GET request.")),
             post(() -> complete("This looks like a POST request."))
           )
         )
     );
 
-    
+
     // tests:
     testRoute(route).run(HttpRequest.GET("/?method=POST")).assertEntity(
         "This looks like a POST request.");
@@ -194,7 +193,7 @@ public class MethodDirectivesExamplesTest extends JUnitRouteTest {
 
     testRoute(route).run(HttpRequest.GET("/?method=hallo")).assertEntity(
         "The server either does not recognize the request method, or it lacks the ability to fulfill the request.");
-    
+
     //#overrideMethodWithParameter
   }
 }

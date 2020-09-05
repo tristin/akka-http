@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package docs.http.javadsl;
@@ -41,7 +41,6 @@ public class CustomStatusCodesExampleTest extends JUnitRouteTest {
   public void customStatusCodes() throws ExecutionException, InterruptedException, NoSuchAlgorithmException {
 
     final ActorSystem system = system();
-    final Materializer materializer = materializer();
     final String host = "127.0.0.1";
 
     //#application-custom-java
@@ -53,7 +52,7 @@ public class CustomStatusCodesExampleTest extends JUnitRouteTest {
       false);// Does not allow entities
 
     // Add custom method to parser settings:
-    final ParserSettings parserSettings = ParserSettings.create(system)
+    final ParserSettings parserSettings = ParserSettings.forServer(system)
       .withCustomStatusCodes(leetCode);
     final ServerSettings serverSettings = ServerSettings.create(system)
       .withParserSettings(parserSettings);
@@ -69,11 +68,9 @@ public class CustomStatusCodesExampleTest extends JUnitRouteTest {
 
     // Use serverSettings in server:
     final CompletionStage<ServerBinding> binding = Http.get(system)
-      .bindAndHandle(route.flow(system, materializer),
-        ConnectHttp.toHost(host, 0),
-        serverSettings,
-        system.log(),
-        materializer);
+      .newServerAt(host, 0)
+      .withSettings(serverSettings)
+      .bind(route);
 
     final ServerBinding serverBinding = binding.toCompletableFuture().get();
 
@@ -85,8 +82,7 @@ public class CustomStatusCodesExampleTest extends JUnitRouteTest {
         .GET("http://" + host + ":" + port + "/"),
         ConnectionContext.https(SSLContext.getDefault()),
         clientSettings,
-        system.log(),
-        materializer)
+        system.log())
       .toCompletableFuture()
       .get();
 

@@ -9,6 +9,7 @@ import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.{ FileIO, Keep, RunnableGraph, Sink, Source }
 import akka.util.ByteString
 import org.openjdk.jmh.annotations._
+import org.openjdk.jmh.infra.Blackhole
 
 import scala.concurrent.{ Await, Future }
 import scala.concurrent.duration._
@@ -51,7 +52,7 @@ class LineParserBenchmark {
     val makeSampleFile = Source.single(line)
       .runWith(FileIO.toPath(tempFile))
 
-    Await.result(makeSampleFile, 5 seconds)
+    Await.result(makeSampleFile, 5.seconds)
 
     parserGraph = FileIO
       .fromPath(tempFile, chunkSize)
@@ -70,7 +71,7 @@ class LineParserBenchmark {
   }
 
   @Benchmark
-  def bench_line_parser(): Unit = {
-    Await.result(parserGraph.run(), Duration.Inf)
+  def bench_line_parser(bh: Blackhole): Unit = {
+    bh.consume(Await.result(parserGraph.run(), Duration.Inf))
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.server
@@ -43,7 +43,7 @@ class DebuggingDirectivesSpec extends RoutingSpec {
       resetDebugMsg()
       Get("/hello") ~> route ~> check {
         response shouldEqual Ok
-        normalizedDebugMsg shouldEqual "1: HttpRequest(HttpMethod(GET),http://example.com/hello,List(),HttpEntity.Strict(none/none,ByteString()),HttpProtocol(HTTP/1.1))\n"
+        normalizedDebugMsg() shouldEqual "1: HttpRequest(HttpMethod(GET),http://example.com/hello,List(),HttpEntity.Strict(none/none,0 bytes total),HttpProtocol(HTTP/1.1))\n"
       }
     }
   }
@@ -58,7 +58,7 @@ class DebuggingDirectivesSpec extends RoutingSpec {
       resetDebugMsg()
       Get("/hello") ~> route ~> check {
         response shouldEqual Ok
-        normalizedDebugMsg shouldEqual "2: Complete(HttpResponse(200 OK,List(),HttpEntity.Strict(none/none,ByteString()),HttpProtocol(HTTP/1.1)))\n"
+        normalizedDebugMsg() shouldEqual "2: Complete(HttpResponse(200 OK,List(),HttpEntity.Strict(none/none,0 bytes total),HttpProtocol(HTTP/1.1)))\n"
       }
     }
   }
@@ -73,17 +73,17 @@ class DebuggingDirectivesSpec extends RoutingSpec {
       resetDebugMsg()
       Get("/hello") ~> route ~> check {
         response shouldEqual Ok
-        normalizedDebugMsg shouldEqual
+        normalizedDebugMsg() shouldEqual
           """|3: Response for
-             |  Request : HttpRequest(HttpMethod(GET),http://example.com/hello,List(),HttpEntity.Strict(none/none,ByteString()),HttpProtocol(HTTP/1.1))
-             |  Response: Complete(HttpResponse(200 OK,List(),HttpEntity.Strict(none/none,ByteString()),HttpProtocol(HTTP/1.1)))
+             |  Request : HttpRequest(HttpMethod(GET),http://example.com/hello,List(),HttpEntity.Strict(none/none,0 bytes total),HttpProtocol(HTTP/1.1))
+             |  Response: Complete(HttpResponse(200 OK,List(),HttpEntity.Strict(none/none,0 bytes total),HttpProtocol(HTTP/1.1)))
              |""".stripMarginWithNewline("\n")
       }
     }
     "be able to log only rejections" in {
-      val rejectionLogger: HttpRequest ⇒ RouteResult ⇒ Option[LogEntry] = req ⇒ {
-        case Rejected(rejections) ⇒ Some(LogEntry(s"Request: $req\nwas rejected with rejections:\n$rejections", Logging.DebugLevel))
-        case _                    ⇒ None
+      val rejectionLogger: HttpRequest => RouteResult => Option[LogEntry] = req => {
+        case Rejected(rejections) => Some(LogEntry(s"Request: $req\nwas rejected with rejections:\n$rejections", Logging.DebugLevel))
+        case _                    => None
       }
 
       val route =
@@ -94,8 +94,8 @@ class DebuggingDirectivesSpec extends RoutingSpec {
       resetDebugMsg()
       Get("/hello") ~> route ~> check {
         handled shouldBe false
-        normalizedDebugMsg shouldEqual
-          """Request: HttpRequest(HttpMethod(GET),http://example.com/hello,List(),HttpEntity.Strict(none/none,ByteString()),HttpProtocol(HTTP/1.1))
+        normalizedDebugMsg() shouldEqual
+          """Request: HttpRequest(HttpMethod(GET),http://example.com/hello,List(),HttpEntity.Strict(none/none,0 bytes total),HttpProtocol(HTTP/1.1))
             |was rejected with rejections:
             |List(ValidationRejection(The request could not be validated,None))
             |""".stripMargin

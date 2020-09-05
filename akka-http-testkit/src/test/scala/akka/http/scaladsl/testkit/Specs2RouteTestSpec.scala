@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.testkit
@@ -22,7 +22,7 @@ class Specs2RouteTestSpec extends Specification with Specs2RouteTest {
   "The ScalatestRouteTest should support" should {
 
     "the most simple and direct route test" in {
-      Get() ~> complete(HttpResponse()) ~> { rr ⇒ rr.awaitResult; rr.response } shouldEqual HttpResponse()
+      Get() ~> complete(HttpResponse()) ~> { rr => rr.awaitResult; rr.response } shouldEqual HttpResponse()
     }
 
     "a test using a directive and some checks" in {
@@ -72,6 +72,29 @@ class Specs2RouteTestSpec extends Specification with Specs2RouteTest {
         responseEntity shouldEqual HttpEntity(ContentTypes.`text/plain(UTF-8)`, "abc")
         header("Fancy") shouldEqual Some(pinkHeader)
       }(result)
+    }
+
+    "failing the test inside the route" in {
+
+      val route = get {
+        failure("BOOM")
+        complete(HttpResponse())
+      }
+
+      {
+        Get() ~> route
+      } must throwA[org.specs2.execute.FailureException]
+    }
+
+    "internal server error" in {
+
+      val route = get {
+        throw new RuntimeException("BOOM")
+      }
+
+      Get().~>(route).~>(check {
+        status shouldEqual InternalServerError
+      })
     }
   }
 }

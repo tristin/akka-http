@@ -1,14 +1,18 @@
 /*
- * Copyright (C) 2009-2018 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2009-2020 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package akka.http.scaladsl.model
 
+import java.net.InetAddress
+
 import akka.util.ByteString
 import headers._
-import org.scalatest.{ Matchers, WordSpec }
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
+import akka.http.javadsl.{ model => jm }
 
-class HttpMessageSpec extends WordSpec with Matchers {
+class HttpMessageSpec extends AnyWordSpec with Matchers {
 
   def test(uri: String, effectiveUri: String, headers: HttpHeader*) =
     HttpRequest.effectiveUri(Uri(uri), List(headers: _*), securedConnection = false, null) shouldEqual Uri(effectiveUri)
@@ -57,6 +61,23 @@ class HttpMessageSpec extends WordSpec with Matchers {
       an[IllegalUriException] should be thrownBy
         HttpRequest(uri = Uri())
     }
+
+    "take attributes into account for hashCode calculation" in {
+      val orig = HttpRequest()
+      val changed = orig.addAttribute(AttributeKeys.remoteAddress, RemoteAddress(InetAddress.getLocalHost))
+
+      orig should not equal (changed)
+      orig.hashCode() should not equal (changed.hashCode())
+    }
+  }
+  "HttpResponse" should {
+    "take attributes into account for hashCode calculation" in {
+      val orig = HttpResponse()
+      val changed = orig.addAttribute(AttributeKeys.remoteAddress, RemoteAddress(InetAddress.getLocalHost))
+
+      orig should not equal (changed)
+      orig.hashCode() should not equal (changed.hashCode())
+    }
   }
 
   "HttpMessage" should {
@@ -70,6 +91,35 @@ class HttpMessageSpec extends WordSpec with Matchers {
       val hostHeader = Host("akka.io")
       val request = HttpRequest().withHeaders(oneCookieHeader, anotherCookieHeader, hostHeader)
       request.headers[`Set-Cookie`] should ===(Seq(oneCookieHeader, anotherCookieHeader))
+    }
+    "retrieve an attribute by key" in {
+      val oneStringKey = AttributeKey[String]("one")
+      // keys with the same type but different names should be different
+      val otherStringKey = AttributeKey[String]("other")
+      // it should be possible to use 'Java attribute keys' in the Scala API's
+      val intKey = jm.AttributeKey.create("int", classOf[Int])
+      // keys with the same name but different types should be different
+      val otherIntKey = AttributeKey[Int]("other")
+
+      val oneString = "A string attribute!"
+      val otherString = "Another"
+      val int = 42
+      val otherInt = 37
+
+      val request = HttpRequest()
+        .addAttribute(oneStringKey, oneString)
+        .addAttribute(otherStringKey, otherString)
+        .addAttribute(intKey, int)
+        .addAttribute(otherIntKey, otherInt)
+
+      request.attribute(oneStringKey) should be(Some(oneString))
+      request.attribute(otherStringKey) should be(Some(otherString))
+      request.attribute(intKey) should be(Some(int))
+      request.attribute(otherIntKey) should be(Some(otherInt))
+
+      val smaller = request.removeAttribute(intKey)
+      smaller.attribute(otherStringKey) should be(Some(otherString))
+      smaller.attribute(intKey) should be(None)
     }
   }
 
